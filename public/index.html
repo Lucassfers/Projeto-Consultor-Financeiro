@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Consultor Financeiro com IA</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/script.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="intro">
+        <div>
+          <p class="eyebrow">Consultor Financeiro com IA</p>
+          <!-- <h1>Diagnostico financeiro simples, visual e com recomendacoes personalizadas.</h1> -->
+        </div>
+        <div class="score-card">
+          <span>Score</span>
+          <strong id="scorePreview">--/100</strong>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <form id="financeForm" class="panel form-panel">
+          <div class="form-grid">
+            <label>
+              Salario mensal
+              <input type="number" name="income" min="0" step="0.01" value="2500" required />
+            </label>
+            <label>
+              Reserva atual
+              <input type="number" name="reserve" min="0" step="0.01" value="3000" required />
+            </label>
+            <label>
+              Idade
+              <input type="number" name="age" min="1" value="24" required />
+            </label>
+            <label>
+              Dividas mensais
+              <input type="number" name="monthlyDebt" min="0" step="0.01" value="0" required />
+            </label>
+            <label>
+              Estabilidade
+              <select name="stability">
+                <option value="media">Media</option>
+                <option value="alta">Alta</option>
+                <option value="baixa">Baixa</option>
+              </select>
+            </label>
+            <label>
+              Perfil
+              <select name="riskProfile">
+                <option value="conservador">Conservador</option>
+                <option value="moderado">Moderado</option>
+                <option value="arrojado">Arrojado</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="expenses-header">
+            <h2>Gastos mensais</h2>
+            <button type="button" id="addExpenseButton">Adicionar</button>
+          </div>
+
+          <div id="expensesList" class="expenses-list">
+            <div class="expense-row">
+              <input name="category" value="Aluguel" aria-label="Categoria" />
+              <input name="value" type="number" min="0" step="0.01" value="800" aria-label="Valor" />
+            </div>
+            <div class="expense-row">
+              <input name="category" value="Comida" aria-label="Categoria" />
+              <input name="value" type="number" min="0" step="0.01" value="500" aria-label="Valor" />
+            </div>
+            <div class="expense-row">
+              <input name="category" value="Lazer" aria-label="Categoria" />
+              <input name="value" type="number" min="0" step="0.01" value="300" aria-label="Valor" />
+            </div>
+            <div class="expense-row">
+              <input name="category" value="Transporte" aria-label="Categoria" />
+              <input name="value" type="number" min="0" step="0.01" value="200" aria-label="Valor" />
+            </div>
+            <div class="expense-row">
+              <input name="category" value="Outros" aria-label="Categoria" />
+              <input name="value" type="number" min="0" step="0.01" value="400" aria-label="Valor" />
+            </div>
+          </div>
+
+          <button class="primary-button" type="submit">Analisar financas</button>
+        </form>
+
+        <section class="results">
+          <div class="panel metrics-panel">
+            <div>
+              <span>Total de gastos</span>
+              <strong id="totalExpenses">R$ --</strong>
+            </div>
+            <div>
+              <span>Sobra mensal</span>
+              <strong id="monthlyBalance">R$ --</strong>
+            </div>
+            <div>
+              <span>Taxa de gastos</span>
+              <strong id="spendingRate">--%</strong>
+            </div>
+            <div>
+              <span>Reserva</span>
+              <strong id="emergencyMonths">-- meses</strong>
+            </div>
+            <div>
+              <span>Endividamento</span>
+              <strong id="debtRate">--%</strong>
+            </div>
+          </div>
+
+          <div class="panel chart-panel">
+            <h2>Distribuicao de gastos</h2>
+            <canvas id="expensesChart" height="220"></canvas>
+          </div>
+
+          <article class="panel advice-panel">
+            <div class="advice-title">
+              <h2>Analise da IA</h2>
+              <span id="adviceSource">Aguardando</span>
+            </div>
+            <p id="adviceText">Preencha os dados e clique em analisar para receber o diagnostico.</p>
+          </article>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

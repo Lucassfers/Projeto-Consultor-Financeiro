@@ -1,31 +1,40 @@
 # Consultor Financeiro com IA
 
-## Sobre o projeto
+Aplicacao web que analisa a situacao financeira do usuario, calcula indicadores no backend e gera recomendacoes usando IA pelo OpenRouter.
 
-O Consultor Financeiro com IA é uma aplicação web que utiliza um modelo de linguagem (LLM) via API para analisar a situação financeira do usuário e fornecer recomendações personalizadas.
+## Funcionalidades
 
-O objetivo do projeto é transformar dados financeiros em insights úteis, ajudando o usuário a entender melhor seus gastos, identificar excessos e receber sugestões de planejamento financeiro e investimentos.
+- Entrada de salario, reserva, idade, dividas mensais, estabilidade, perfil de risco e gastos por categoria.
+- Calculo de total de gastos, sobra mensal, percentual por categoria, taxa de endividamento, meses de reserva e score financeiro.
+- Endpoint `POST /api/analyze` em Node.js + Express.
+- Analise por LLM usando OpenRouter com o modelo `openai/gpt-oss-120b:free`.
+- Resposta local automatica quando a chave nao estiver configurada.
+- Grafico de pizza em canvas com a distribuicao dos gastos.
 
-## Como funciona
+## Como rodar
 
-O usuário informa dados financeiros como:
+```bash
+npm install
+npm run dev
+```
 
-* Salário mensal
-* Reserva financeira atual
-* Gastos por categoria (alimentação, moradia, lazer, transporte, etc.)
+Depois acesse:
 
-A aplicação processa esses dados, calcula métricas importantes e envia as informações para a IA, que atua como um assistente de consultoria financeira.
+```text
+http://localhost:3000
+```
 
-Com base nisso, o sistema retorna:
+Para usar a IA, crie um arquivo `.env` baseado em `.env.example`:
 
-* Diagnóstico financeiro
-* Análise de gastos
-* Sugestões de economia
-* Recomendações de investimento
-* Visualização gráfica da distribuição dos gastos
+```env
+OPENROUTER_API_KEY=sua_chave
+OPENROUTER_MODEL=openai/gpt-oss-120b:free
+OPENROUTER_SITE_URL=http://localhost:3000
+PORT=3000
+```
 
-## Objetivo acadêmico
+## Objetivo academico
 
-Este projeto foi desenvolvido para demonstrar a integração entre uma aplicação backend e uma API de inteligência artificial, mostrando como LLMs podem ser utilizados para criar funcionalidades úteis em sistemas reais.
+O projeto demonstra integracao entre backend, frontend e API de inteligencia artificial. As contas financeiras ficam no codigo, enquanto a IA interpreta os indicadores e gera aconselhamento em linguagem natural.
 
-Projeto da disciplina de Inteligência Artificial, ministrada pelo professor Pablo de Chiaro.
+O score financeiro considera reserva de emergencia, taxa de poupanca, endividamento e estabilidade financeira.

@@ -1,0 +1,21 @@
+{
+  "name": "consultor-financeiro-ia",
+  "version": "1.0.0",
+  "description": "Aplicacao web de consultoria financeira com IA.",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node src/server.js",
+    "start": "node src/server.js"
+  },
+  "keywords": [
+    "ia",
+    "financas",
+    "express"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
