@@ -1,36 +1,82 @@
 # Finora - Consultor Financeiro com IA
 
-Projeto academico da disciplina Fundamentos de Inteligencia Artificial. A aplicacao ajuda o usuario a organizar informacoes financeiras, importar extratos e receber uma analise educacional gerada por IA.
+Finora e um projeto academico da disciplina Fundamentos de Inteligencia Artificial. A aplicacao recebe dados financeiros do usuario, organiza extratos bancarios, calcula indicadores e usa um LLM via OpenRouter para gerar uma analise educacional em portugues.
 
-A aplicacao tem duas areas principais:
+O objetivo nao e substituir uma consultoria financeira profissional. O foco do projeto e demonstrar uma aplicacao real usando IA generativa, backend, frontend, banco de dados e uma proposta clara de uso.
 
-- **Consultoria com IA:** pagina inicial em `http://localhost:3000`, com formulario financeiro e resposta gerada via OpenRouter.
-- **Painel financeiro:** area em `http://localhost:3000/painel`, com dashboard, importacao de extratos, categorias e historico de transacoes.
+## O Que O Projeto Faz
 
-> A analise gerada pela IA tem finalidade educacional e nao substitui orientacao financeira profissional.
+- Gera uma analise financeira personalizada com IA a partir de renda, reserva, dividas, gastos, perfil de risco e objetivos.
+- Usa o modelo `openai/gpt-oss-120b:free` pelo OpenRouter.
+- Mantem a chave da IA no backend, dentro do arquivo `.env`.
+- Permite importar extratos em PDF ou imagem.
+- Usa leitura de PDF com `pdfjs-dist` e OCR com `tesseract.js` para imagens.
+- Permite revisar transacoes antes de salvar.
+- Salva categorias, importacoes e transacoes em PostgreSQL quando `DATABASE_URL` esta configurada.
+- Funciona sem PostgreSQL usando armazenamento em memoria para testes e apresentacoes.
+- Mostra dashboard financeiro com entradas, saidas, saldo, categorias e graficos.
+- Permite gerar diagnosticos de importacoes especificas.
 
-## Tecnologias
+## Areas Da Aplicacao
+
+### Consultoria com IA
+
+Endereco:
+
+```text
+http://localhost:3000
+```
+
+Nesta tela o usuario preenche:
+
+- salario mensal;
+- reserva atual;
+- idade;
+- dividas mensais;
+- estabilidade da renda;
+- perfil de investimento;
+- gastos mensais por categoria;
+- objetivos principais;
+- detalhes ou preocupacoes financeiras.
+
+Depois de enviar, o sistema monta um prompt financeiro resumido, chama `/api/llm` no backend e exibe a resposta da IA em secoes como diagnostico, pontos de atencao, caminhos de investimento, plano de acao e proximos passos.
+
+### Painel financeiro
+
+Endereco:
+
+```text
+http://localhost:3000/painel
+```
+
+No painel existem duas abas principais:
+
+- **Importacoes:** leitura de extratos, revisao de transacoes e historico de arquivos confirmados.
+- **Categorias:** cadastro e manutencao de categorias de entrada e saida.
+
+Depois que existem transacoes salvas no banco, o painel tambem alimenta os graficos e os resumos usados pela consultoria.
+
+## Tecnologias Usadas
 
 - Node.js 22.13 ou superior
+- Express
 - Next.js
 - React
 - TypeScript
 - Tailwind CSS
-- Express
-- PostgreSQL
+- PostgreSQL opcional para persistencia dos dados
 - OpenRouter
+- pdfjs-dist
+- tesseract.js
 
-## Como Baixar Em Outra Maquina
+## Requisitos Para Rodar
 
-### 1. Instalar os programas necessarios
+Antes de iniciar o projeto, instale:
 
-Antes de baixar o projeto, instale:
+- Node.js 22.13 ou superior: https://nodejs.org
+- PostgreSQL local ou um banco online, como Neon, Supabase ou Render, se quiser salvar os dados de forma persistente.
 
-- **Node.js 22.13 ou superior:** https://nodejs.org
-- **Git:** https://git-scm.com
-- **PostgreSQL** local ou um banco online, como Neon, Supabase ou Render.
-
-Para conferir se esta tudo instalado:
+Confira se os programas estao instalados:
 
 ```bash
 node -v
@@ -38,24 +84,8 @@ npm -v
 git --version
 ```
 
-### 2. Baixar o projeto
 
-Pelo Git:
-
-```bash
-git clone URL_DO_REPOSITORIO
-cd Projeto-Consultor-Financeiro
-```
-
-Troque `URL_DO_REPOSITORIO` pela URL real do repositorio, por exemplo:
-
-```bash
-git clone https://github.com/seu-usuario/seu-repositorio.git
-```
-
-Se receber o projeto em `.zip`, extraia a pasta e abra o terminal dentro dela.
-
-### 3. Instalar as dependencias
+## Como Instalar As Dependencias
 
 Na raiz do projeto, execute:
 
@@ -63,7 +93,7 @@ Na raiz do projeto, execute:
 npm install
 ```
 
-Se quiser instalar exatamente as versoes registradas no `package-lock.json`, use:
+Se quiser instalar exatamente as versoes travadas no `package-lock.json`, use:
 
 ```bash
 npm ci
@@ -73,161 +103,141 @@ npm ci
 
 Crie um arquivo chamado `.env` na raiz do projeto.
 
-Exemplo:
+Voce pode usar este modelo:
 
 ```env
 OPENROUTER_API_KEY=sua_chave_openrouter_aqui
 OPENROUTER_MODEL=openai/gpt-oss-120b:free
 OPENROUTER_SITE_URL=http://localhost:3000
 PORT=3000
-DATABASE_URL=postgresql://usuario:senha@host:5432/banco
+# Opcional. Sem DATABASE_URL, o app usa armazenamento em memoria.
+# DATABASE_URL=postgresql://usuario:senha@host:5432/banco
 ```
 
-### O que cada variavel faz
+Variaveis:
 
-| Variavel | Obrigatoria | Descricao |
+| Variavel | Obrigatoria | Para que serve |
 | --- | --- | --- |
-| `OPENROUTER_API_KEY` | Sim | Chave da API do OpenRouter. |
-| `OPENROUTER_MODEL` | Nao | Modelo usado na analise. Se nao informar, usa `openai/gpt-oss-120b:free`. |
+| `OPENROUTER_API_KEY` | Sim | Chave da API do OpenRouter usada pelo backend para chamar o modelo. |
+| `OPENROUTER_MODEL` | Nao | Modelo de IA. Se ficar vazio, o sistema usa `openai/gpt-oss-120b:free`. |
 | `OPENROUTER_SITE_URL` | Nao | URL enviada ao OpenRouter como origem da aplicacao. |
-| `PORT` | Nao | Porta local do servidor. Se nao informar, usa `3000`. |
-| `DATABASE_URL` | Sim | String de conexao do PostgreSQL. |
+| `PORT` | Nao | Porta do servidor local. O padrao e `3000`. |
+| `DATABASE_URL` | Nao | String de conexao do PostgreSQL. Sem ela, o app usa armazenamento em memoria. |
 
-Nunca envie o arquivo `.env` para o GitHub. Ele contem dados sensiveis e ja esta no `.gitignore`.
+### Modo sem PostgreSQL
 
-## Configuracao Do Banco De Dados
+Se voce nao configurar `DATABASE_URL`, o projeto abre normalmente. Nesse caso:
 
-O projeto precisa de um banco PostgreSQL com as tabelas `categories`, `imports` e `transactions`.
+- categorias, importacoes e transacoes ficam em memoria;
+- os dados somem quando o servidor e reiniciado;
+- a consultoria com IA continua funcionando;
+- o painel, categorias e importacoes continuam disponiveis para teste.
 
-Execute o SQL abaixo no seu banco. Pode ser pelo terminal `psql`, pelo painel do Neon/Supabase ou por outra ferramenta de banco.
+Use PostgreSQL quando quiser manter historico entre execucoes.
 
-```sql
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-DO $$
-BEGIN
-  CREATE TYPE category_type AS ENUM ('income', 'expense');
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
+## Como Abrir O Projeto
 
-CREATE TABLE IF NOT EXISTS categories (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name varchar(120) NOT NULL UNIQUE,
-  type category_type NOT NULL DEFAULT 'expense',
-  color varchar(20) NOT NULL DEFAULT '#2563eb',
-  active boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS imports (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  bank varchar(40) NOT NULL,
-  original_file_name varchar(255) NOT NULL,
-  status varchar(30) NOT NULL DEFAULT 'completed',
-  transaction_count integer NOT NULL DEFAULT 0,
-  statement_month char(7),
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS transactions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  import_id uuid NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
-  category_id uuid REFERENCES categories(id) ON DELETE SET NULL,
-  date date NOT NULL,
-  description varchar(500) NOT NULL,
-  amount numeric(12, 2) NOT NULL,
-  type varchar(20) NOT NULL CHECK (type IN ('income', 'expense', 'ignored')),
-  ocr_confidence numeric(4, 3) NOT NULL DEFAULT 1,
-  category_name varchar(120),
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_transactions_import_id ON transactions(import_id);
-CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
-CREATE INDEX IF NOT EXISTS idx_imports_created_at ON imports(created_at);
-```
-
-Opcionalmente, cadastre algumas categorias iniciais:
-
-```sql
-INSERT INTO categories (name, type, color) VALUES
-  ('Alimentacao', 'expense', '#ef4444'),
-  ('Transporte', 'expense', '#f97316'),
-  ('Moradia', 'expense', '#8b5cf6'),
-  ('Saude', 'expense', '#14b8a6'),
-  ('Educacao', 'expense', '#3b82f6'),
-  ('Lazer', 'expense', '#ec4899'),
-  ('Outros', 'expense', '#64748b'),
-  ('Salario', 'income', '#22c55e'),
-  ('Freelance', 'income', '#10b981'),
-  ('Rendimentos', 'income', '#84cc16')
-ON CONFLICT (name) DO NOTHING;
-```
-
-Se o banco ja existir e faltar apenas o campo `type` em categorias, tambem existe a migracao:
-
-```bash
-db/migrations/001_add_category_type.sql
-```
-
-## Como Rodar O Projeto
-
-Na raiz do projeto:
+Depois de instalar dependencias e criar `.env`, rode:
 
 ```bash
 npm start
 ```
 
-Ou, durante desenvolvimento:
+Ou, em desenvolvimento:
 
 ```bash
 npm run dev
 ```
 
-Depois acesse:
+Quando o terminal mostrar que o servidor iniciou, abra o navegador em:
 
-- Consultoria com IA: `http://localhost:3000`
-- Painel financeiro: `http://localhost:3000/painel`
-- Status da API: `http://localhost:3000/api/status`
+```text
+http://localhost:3000
+```
 
-Se voce mudou a variavel `PORT`, troque `3000` pela porta escolhida.
+Outros enderecos uteis:
+
+```text
+http://localhost:3000/painel
+http://localhost:3000/api/status
+```
+
+Se voce mudou a variavel `PORT`, troque `3000` pela porta configurada.
+
+## Como Usar A Consultoria Com IA
+
+1. Abra `http://localhost:3000`.
+2. Preencha os dados do formulario financeiro.
+3. Se quiser, selecione faturas ja importadas para preencher parte dos valores automaticamente.
+4. Cadastre ou ajuste os gastos mensais.
+5. Escolha pelo menos um objetivo principal.
+6. Clique em **Analisar minhas financas**.
+7. Aguarde a resposta da IA.
+8. Veja o diagnostico no dashboard da propria pagina.
+9. Use **Exportar PDF** para gerar um relatorio imprimivel.
+
+O sistema envia para a IA somente um resumo financeiro, nao o arquivo completo do extrato.
+
+## Como Usar A Importacao De Extratos
+
+1. Abra `http://localhost:3000/painel`.
+2. Entre em **Importacoes**.
+3. Escolha o banco ou formato do extrato.
+4. Selecione um PDF ou imagem.
+5. Clique para ler as transacoes.
+6. Revise data, descricao, tipo, categoria, valor e confianca.
+7. Marque itens incorretos como `Ignorar`, se necessario.
+8. Confirme a importacao.
+9. O extrato salvo passa a aparecer no historico e pode alimentar o dashboard.
+
+Arquivos PDF sao lidos no navegador com `pdfjs-dist`. Imagens usam OCR com `tesseract.js`.
+
+## Como Usar Categorias
+
+1. Abra `http://localhost:3000/painel#categorias`.
+2. Cadastre categorias de entrada ou saida.
+3. Escolha nome, tipo e cor.
+4. Use essas categorias para classificar transacoes importadas.
+5. Edite ou desative categorias quando necessario.
+
+Categorias corretas deixam os graficos e diagnosticos mais uteis.
 
 ## Scripts Disponiveis
 
-```bash
-npm run dev     # inicia o servidor em modo desenvolvimento
-npm start       # inicia o servidor
-npm run build   # gera o build do Next.js
-npm run lint    # verifica problemas de padronizacao no codigo
-```
+| Comando | Funcao |
+| --- | --- |
+| `npm run dev` | Inicia o servidor em modo desenvolvimento. |
+| `npm start` | Inicia o servidor. |
+| `npm run build` | Gera o build do Next.js. |
+| `npm run lint` | Executa a verificacao de padronizacao do codigo. |
 
 ## Estrutura Do Projeto
 
 ```text
 .
 |-- server.js                  # Servidor Express, Next.js, PostgreSQL e OpenRouter
-|-- package.json               # Dependencias e scripts do projeto
+|-- package.json               # Dependencias e scripts
 |-- package-lock.json          # Versoes travadas das dependencias
 |-- public/
-|   |-- index.html             # Pagina inicial da consultoria com IA
-|   |-- script.js              # Formulario e chamada para /api/llm
+|   |-- index.html             # Tela principal da consultoria
+|   |-- script.js              # Logica da consultoria, prompt e dashboard da pagina inicial
 |   `-- styles.css             # Estilos da pagina inicial
 |-- app/
-|   |-- layout.tsx
-|   |-- globals.css
+|   |-- layout.tsx             # Layout base do Next.js
+|   |-- globals.css            # Estilos globais do painel
 |   `-- painel/                # Rotas do painel financeiro
 |-- components/
 |   |-- categories/            # Tela de categorias
-|   |-- charts/                # Graficos do dashboard
+|   |-- charts/                # Graficos
 |   |-- dashboard/             # Dashboard financeiro
-|   |-- imports/               # Importacao e revisao de extratos
+|   |-- imports/               # Importacao e detalhes dos extratos
 |   |-- layout/                # Header e Footer
 |   `-- ui/                    # Componentes visuais reutilizaveis
 |-- lib/
 |   |-- api.ts                 # Cliente das rotas internas
-|   |-- importer.ts            # Leitura local de PDF/imagem
-|   `-- store.ts               # Calculos e utilitarios do painel
+|   |-- importer.ts            # Leitura de PDF/imagem e parser de extrato
+|   `-- store.ts               # Calculos, formatadores e utilitarios
 |-- types/
 |   `-- index.ts               # Tipos compartilhados
 `-- db/
@@ -252,13 +262,13 @@ npm run lint    # verifica problemas de padronizacao no codigo
 
 ## Testes Rapidos
 
-Verificar API:
+Verificar se o servidor responde:
 
 ```bash
 curl http://localhost:3000/api/status
 ```
 
-Testar IA:
+Testar a IA pelo terminal:
 
 ```bash
 curl -X POST http://localhost:3000/api/llm \
@@ -268,52 +278,78 @@ curl -X POST http://localhost:3000/api/llm \
 
 ## Problemas Comuns
 
-### Erro: configure OPENROUTER_API_KEY
+### O servidor fecha dizendo para configurar OPENROUTER_API_KEY
 
-O arquivo `.env` nao existe ou nao tem a variavel `OPENROUTER_API_KEY`.
+Crie o arquivo `.env` e informe uma chave valida do OpenRouter.
 
-### Erro: configure DATABASE_URL
+### Estou sem PostgreSQL. Posso abrir mesmo assim?
 
-O arquivo `.env` nao existe ou nao tem a variavel `DATABASE_URL`.
+Sim. Deixe `DATABASE_URL` vazia ou remova essa variavel do `.env`. O servidor vai avisar que esta usando armazenamento em memoria.
 
 ### Erro de conexao com o banco
 
-Confira se:
+Confira:
 
-- A `DATABASE_URL` esta correta.
-- O banco PostgreSQL esta ativo.
-- O SSL esta configurado se o provedor exigir.
-- As tabelas foram criadas.
+- se a `DATABASE_URL` esta correta;
+- se o banco esta ligado;
+- se as tabelas foram criadas;
+- se o provedor exige SSL;
+- se usuario e senha estao corretos.
 
-### Porta em uso
+### A pagina abre, mas as importacoes/categorias nao carregam
 
-Se a porta `3000` ja estiver sendo usada, altere no `.env`:
+Se estiver usando PostgreSQL, isso normalmente indica problema no banco de dados. Teste `http://localhost:3000/api/status` e confira o terminal onde o servidor esta rodando.
+
+Se estiver usando o modo em memoria, reiniciar o servidor apaga as importacoes e categorias criadas durante o teste.
+
+### Erro ao consultar OpenRouter
+
+Possiveis causas:
+
+- chave invalida;
+- falta de credito ou limite de uso;
+- modelo gratuito indisponivel temporariamente;
+- prompt grande demais;
+- instabilidade no provedor.
+
+O servidor possui uma resposta local de apoio para alguns casos de limite ou alta demanda, mas a integracao principal e com OpenRouter.
+
+### Porta 3000 em uso
+
+Altere a porta no `.env`:
 
 ```env
 PORT=3001
 OPENROUTER_SITE_URL=http://localhost:3001
 ```
 
-Depois acesse `http://localhost:3001`.
+Depois acesse:
+
+```text
+http://localhost:3001
+```
 
 ### Dependencias com erro
 
-Apague `node_modules` e instale novamente:
+Instale novamente:
 
 ```bash
 npm install
 ```
 
+Se ainda falhar, apague `node_modules` e rode `npm install` outra vez.
+
 ## Observacoes De Seguranca
 
 - Nao publique `.env`.
 - Nao coloque chaves reais no README.
-- Se uma chave de API ou senha de banco for compartilhada por engano, gere uma nova chave no provedor.
-- Em outra maquina, cada pessoa deve configurar o proprio `.env`.
+- Nao coloque senha de banco em commits.
+- Se uma chave for compartilhada por engano, gere outra no provedor.
+- Cada pessoa que baixar o projeto deve criar o proprio `.env`.
 
-## Arquivos Que Nao Precisam Ser Copiados
+## Arquivos Gerados Ou Locais
 
-Estes arquivos e pastas sao gerados automaticamente e nao precisam ir para outra maquina:
+Estes arquivos e pastas nao precisam ser copiados manualmente:
 
 ```text
 node_modules/
@@ -323,4 +359,4 @@ node_modules/
 .env
 ```
 
-Ao baixar o projeto em outro computador, basta rodar `npm install` para recriar as dependencias.
+Ao baixar em outro computador, basta rodar `npm install` para recriar as dependencias.

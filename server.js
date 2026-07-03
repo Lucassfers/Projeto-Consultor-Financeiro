@@ -20,6 +20,23 @@ const nextApp = next({ dev: isDevelopment, hostname: "localhost", port: PORT });
 const handleNextRequest = nextApp.getRequestHandler();
 const llmCache = new Map();
 const pendingLlmRequests = new Map();
+const defaultCategories = [
+  { id: "default-alimentacao", name: "Alimentacao", type: "expense", color: "#ef4444", active: true, createdAt: "2025-01-01T00:00:00.000Z" },
+  { id: "default-transporte", name: "Transporte", type: "expense", color: "#f97316", active: true, createdAt: "2025-01-01T00:00:00.000Z" },
+  { id: "default-moradia", name: "Moradia", type: "expense", color: "#8b5cf6", active: true, createdAt: "2025-01-01T00:00:00.000Z" },
+  { id: "default-saude", name: "Saude", type: "expense", color: "#14b8a6", active: true, createdAt: "2025-01-01T00:00:00.000Z" },
+  { id: "default-educacao", name: "Educacao", type: "expense", color: "#3b82f6", active: true, createdAt: "2025-01-01T00:00:00.000Z" },
+  { id: "default-lazer", name: "Lazer", type: "expense", color: "#ec4899", active: true, createdAt: "2025-01-01T00:00:00.000Z" },
+  { id: "default-outros", name: "Outros", type: "expense", color: "#64748b", active: true, createdAt: "2025-01-01T00:00:00.000Z" },
+  { id: "default-salario", name: "Salario", type: "income", color: "#22c55e", active: true, createdAt: "2025-01-01T00:00:00.000Z" },
+  { id: "default-freelance", name: "Freelance", type: "income", color: "#10b981", active: true, createdAt: "2025-01-01T00:00:00.000Z" },
+  { id: "default-rendimentos", name: "Rendimentos", type: "income", color: "#84cc16", active: true, createdAt: "2025-01-01T00:00:00.000Z" },
+];
+const memoryStore = {
+  categories: [...defaultCategories],
+  imports: [],
+  transactions: [],
+};
 
 if (!API_KEY) {
   console.error("Erro: configure OPENROUTER_API_KEY no arquivo .env.");
@@ -27,11 +44,11 @@ if (!API_KEY) {
 }
 
 if (!DATABASE_URL) {
-  console.error("Erro: configure DATABASE_URL no arquivo .env.");
-  process.exit(1);
+  console.warn("Aviso: DATABASE_URL nao configurada. Usando armazenamento em memoria; dados de categorias/importacoes serao perdidos ao reiniciar.");
 }
 
-const pool = new pg.Pool({ connectionString: DATABASE_URL });
+const pool = DATABASE_URL ? new pg.Pool({ connectionString: DATABASE_URL }) : null;
+const storageMode = pool ? "postgres" : "memory";
 
 function categoryFromRow(row) {
   return { id: row.id, name: row.name, type: row.type, color: row.color, createdAt: row.created_at };
@@ -91,6 +108,47 @@ function databaseDate(value) {
   return result;
 }
 
+function activeMemoryCategories() {
+  return memoryStore.categories
+    .filter((category) => category.active)
+    .map(({ active: _active, ...category }) => category)
+    .sort((first, second) => first.type.localeCompare(second.type) || first.name.localeCompare(second.name, "pt-BR"));
+}
+
+function memoryImportTotal(importId) {
+  return memoryStore.transactions
+    .filter((transaction) => transaction.importId === importId && transaction.type === "expense")
+    .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
+}
+
+function memoryImportHistoryItem(item) {
+  return {
+    id: item.id,
+    importId: item.id,
+    fileName: item.fileName,
+    bank: item.bank,
+    statementMonth: item.statementMonth,
+    transactionCount: item.transactionCount,
+    total: memoryImportTotal(item.id),
+    createdAt: item.createdAt,
+  };
+}
+
+function memoryTransactionSortValue(transaction) {
+  const [day, month, year] = String(transaction.date || "").split("/").map(Number);
+  return `${year || 0}-${String(month || 0).padStart(2, "0")}-${String(day || 0).padStart(2, "0")}`;
+}
+
+function memoryTransactionsForImport(importId) {
+  return memoryStore.transactions
+    .filter((transaction) => transaction.importId === importId && transaction.type !== "ignored")
+    .sort((first, second) => memoryTransactionSortValue(first).localeCompare(memoryTransactionSortValue(second)));
+}
+
+function findMemoryCategoryByName(name) {
+  return memoryStore.categories.find((category) => category.active && category.name === name);
+}
+
 await nextApp.prepare();
 
 app.use(cors());
@@ -102,6 +160,8 @@ app.get("/favicon.ico", (_request, response) => {
 });
 
 app.get("/api/categories", async (_request, response) => {
+  if (!pool) return response.json(activeMemoryCategories());
+
   try {
     const { rows } = await pool.query("SELECT id, name, type, color, created_at FROM categories WHERE active = true ORDER BY type, name");
     response.json(rows.map(categoryFromRow));
@@ -116,6 +176,22 @@ app.post("/api/categories", async (request, response) => {
   const type = request.body?.type;
   const color = request.body?.color;
   if (!name || !["income", "expense"].includes(type) || !/^#[0-9a-f]{6}$/i.test(color)) return response.status(400).json({ erro: "Dados da categoria invalidos." });
+  if (!pool) {
+    const existing = memoryStore.categories.find((category) => category.name.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"));
+    const saved = {
+      id: existing?.id || crypto.randomUUID(),
+      name,
+      type,
+      color,
+      active: true,
+      createdAt: existing?.createdAt || new Date().toISOString(),
+    };
+    if (existing) Object.assign(existing, saved);
+    else memoryStore.categories.push(saved);
+    const { active: _active, ...category } = saved;
+    return response.status(201).json(category);
+  }
+
   try {
     const { rows } = await pool.query("INSERT INTO categories (name, type, color) VALUES ($1, $2, $3) ON CONFLICT (name) DO UPDATE SET type=EXCLUDED.type, color=EXCLUDED.color, active=true RETURNING id, name, type, color, created_at", [name, type, color]);
     response.status(201).json(categoryFromRow(rows[0]));
@@ -130,6 +206,19 @@ app.put("/api/categories/:id", async (request, response) => {
   const type = request.body?.type;
   const color = request.body?.color;
   if (!name || !["income", "expense"].includes(type) || !/^#[0-9a-f]{6}$/i.test(color)) return response.status(400).json({ erro: "Dados da categoria invalidos." });
+  if (!pool) {
+    const duplicate = memoryStore.categories.find((category) => category.id !== request.params.id && category.active && category.name.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"));
+    if (duplicate) return response.status(409).json({ erro: "Ja existe uma categoria com esse nome." });
+    const category = memoryStore.categories.find((item) => item.id === request.params.id && item.active);
+    if (!category) return response.status(404).json({ erro: "Categoria nao encontrada." });
+    Object.assign(category, { name, type, color });
+    memoryStore.transactions.forEach((transaction) => {
+      if (transaction.categoryId === category.id) transaction.category = category.name;
+    });
+    const { active: _active, ...saved } = category;
+    return response.json(saved);
+  }
+
   try {
     const { rows } = await pool.query("UPDATE categories SET name=$1, type=$2, color=$3 WHERE id=$4 AND active=true RETURNING id, name, type, color, created_at", [name, type, color, request.params.id]);
     if (!rows.length) return response.status(404).json({ erro: "Categoria nao encontrada." });
@@ -142,6 +231,13 @@ app.put("/api/categories/:id", async (request, response) => {
 });
 
 app.delete("/api/categories/:id", async (request, response) => {
+  if (!pool) {
+    const category = memoryStore.categories.find((item) => item.id === request.params.id && item.active);
+    if (!category) return response.status(404).json({ erro: "Categoria nao encontrada." });
+    category.active = false;
+    return response.json({ ok: true });
+  }
+
   try {
     const result = await pool.query("UPDATE categories SET active=false WHERE id=$1 AND active=true", [request.params.id]);
     if (!result.rowCount) return response.status(404).json({ erro: "Categoria nao encontrada." });
@@ -153,6 +249,15 @@ app.delete("/api/categories/:id", async (request, response) => {
 });
 
 app.get("/api/imports", async (_request, response) => {
+  if (!pool) {
+    return response.json(
+      memoryStore.imports
+        .filter((item) => item.status === "completed")
+        .map(memoryImportHistoryItem)
+        .sort((first, second) => String(second.createdAt).localeCompare(String(first.createdAt)))
+    );
+  }
+
   try {
     const { rows } = await pool.query(`
       SELECT i.id, i.bank, i.original_file_name, i.transaction_count, i.created_at, i.statement_month,
@@ -169,6 +274,12 @@ app.get("/api/imports", async (_request, response) => {
 });
 
 app.get("/api/imports/:id", async (request, response) => {
+  if (!pool) {
+    const item = memoryStore.imports.find((candidate) => candidate.id === request.params.id && candidate.status === "completed");
+    if (!item) return response.status(404).json({ erro: "Importacao nao encontrada." });
+    return response.json({ ...memoryImportHistoryItem(item), transactions: memoryTransactionsForImport(item.id) });
+  }
+
   try {
     const { rows: importRows } = await pool.query(`
       SELECT i.id, i.bank, i.original_file_name, i.transaction_count, i.created_at, i.statement_month,
@@ -196,6 +307,14 @@ app.get("/api/imports/:id", async (request, response) => {
 });
 
 app.get("/api/transactions", async (_request, response) => {
+  if (!pool) {
+    return response.json(
+      memoryStore.transactions
+        .filter((transaction) => transaction.type !== "ignored")
+        .sort((first, second) => memoryTransactionSortValue(second).localeCompare(memoryTransactionSortValue(first)))
+    );
+  }
+
   try {
     const { rows } = await pool.query(`
       SELECT t.id, t.import_id, t.date, t.description, t.amount, t.type, t.ocr_confidence, t.created_at,
@@ -217,6 +336,52 @@ app.get("/api/transactions", async (_request, response) => {
 app.post("/api/imports", async (request, response) => {
   const { bank, fileName, statementMonth, transactions } = request.body || {};
   if (!["nubank", "banco-do-brasil"].includes(bank) || !String(fileName || "").trim() || !Array.isArray(transactions) || !transactions.length) return response.status(400).json({ erro: "Dados da importacao invalidos." });
+  if (!pool) {
+    try {
+      const normalizedMonth = databaseMonth(statementMonth);
+      const importId = crypto.randomUUID();
+      const createdAt = new Date().toISOString();
+      const accepted = transactions.filter((item) => item.type !== "ignored");
+      let total = 0;
+      accepted.forEach((item) => {
+        if (!["income", "expense"].includes(item.type) || !String(item.description || "").trim() || !Number.isFinite(Number(item.amount))) throw new Error("Uma das transacoes possui dados invalidos.");
+        databaseDate(item.date);
+        const amount = Math.abs(Number(item.amount));
+        const category = findMemoryCategoryByName(item.category);
+        if (item.category && (!category || category.type !== item.type)) throw new Error(`Categoria invalida para a transacao: ${item.category}`);
+        if (item.type === "expense") total += amount;
+        memoryStore.transactions.push({
+          id: crypto.randomUUID(),
+          importId,
+          date: item.date,
+          description: String(item.description).trim().slice(0, 500),
+          amount,
+          type: item.type,
+          categoryId: category?.id || null,
+          category: item.category || "",
+          confidence: Number(item.confidence ?? 1),
+          statementMonth: normalizedMonth,
+          sourceFile: String(fileName).slice(0, 255),
+          importedAt: createdAt,
+          bank,
+        });
+      });
+      const entry = {
+        id: importId,
+        fileName: String(fileName).slice(0, 255),
+        bank,
+        statementMonth: normalizedMonth,
+        transactionCount: accepted.length,
+        status: "completed",
+        createdAt,
+      };
+      memoryStore.imports.push(entry);
+      return response.status(201).json({ ...memoryImportHistoryItem(entry), total });
+    } catch (error) {
+      return response.status(400).json({ erro: error instanceof Error ? error.message : "Nao foi possivel salvar a importacao." });
+    }
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -244,6 +409,27 @@ app.post("/api/imports", async (request, response) => {
 app.put("/api/imports/:id/transactions", async (request, response) => {
   const transactions = request.body?.transactions;
   if (!Array.isArray(transactions) || !transactions.length) return response.status(400).json({ erro: "Informe as transacoes para atualizar." });
+  if (!pool) {
+    try {
+      const item = memoryStore.imports.find((candidate) => candidate.id === request.params.id && candidate.status === "completed");
+      if (!item) return response.status(404).json({ erro: "Importacao nao encontrada." });
+      for (const update of transactions) {
+        const id = String(update.id || "").trim();
+        const categoryName = String(update.category || "").trim();
+        if (!id || !categoryName) throw new Error("Todas as transacoes precisam de uma categoria.");
+        const transaction = memoryStore.transactions.find((candidate) => candidate.id === id && candidate.importId === request.params.id);
+        if (!transaction) throw new Error("Uma das transacoes nao pertence a esta importacao.");
+        const category = findMemoryCategoryByName(categoryName);
+        if (!category || category.type !== transaction.type) throw new Error(`Categoria invalida para a transacao: ${categoryName}`);
+        transaction.categoryId = category.id;
+        transaction.category = category.name;
+      }
+      return response.json(memoryTransactionsForImport(request.params.id));
+    } catch (error) {
+      return response.status(400).json({ erro: error instanceof Error ? error.message : "Nao foi possivel atualizar a importacao." });
+    }
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -289,6 +475,7 @@ app.get("/api/status", (_request, response) => {
   response.json({
     status: "API local funcionando",
     model: MODEL,
+    storage: storageMode,
     promptLimit: LLM_PROMPT_CHAR_LIMIT,
     responseTokenLimit: LLM_RESPONSE_TOKEN_LIMIT,
     reportVersion: LLM_REPORT_VERSION,
