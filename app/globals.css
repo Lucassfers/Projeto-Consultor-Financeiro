@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: Arial, Helvetica, sans-serif;
+  --font-serif: Georgia, "Times New Roman", serif;
+  --color-ink: #183c32;
+  --color-accent: #164c3d;
+  --color-accent-soft: #e7f0eb;
+  --color-canvas: #f4f1e9;
+  --color-panel: #fffdf8;
+  --color-panel-soft: #f8f6ef;
+  --color-muted: #718078;
+  --color-line: #dedbd0;
+  --color-gold: #b68432;
+  --color-gold-soft: #f5ead2;
+}
+
+@layer base {
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { @apply m-0 bg-canvas text-ink antialiased; }
+  button, input, select { font: inherit; }
+  button { @apply cursor-pointer disabled:cursor-not-allowed disabled:opacity-60; }
+}

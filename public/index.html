@@ -3,129 +3,198 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Consultor Financeiro com IA</title>
+    <meta name="description" content="Consultoria financeira educacional com inteligencia artificial." />
+    <title>Finora | Consultoria financeira com IA</title>
     <link rel="stylesheet" href="/styles.css" />
     <script src="/script.js" defer></script>
   </head>
   <body>
-    <main class="app-shell">
-      <section class="intro">
-        <div>
-          <p class="eyebrow">Consultor Financeiro com IA</p>
-          <!-- <h1>Diagnostico financeiro simples, visual e com recomendacoes personalizadas.</h1> -->
-        </div>
-        <div class="score-card">
-          <span>Score</span>
-          <strong id="scorePreview">--/100</strong>
+    <div class="page-glow" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Finora, inicio">
+        <span class="brand-mark">F</span>
+        <span class="brand-copy">
+          <strong>Finora</strong>
+          <small>Consultoria inteligente</small>
+        </span>
+      </a>
+
+      <nav class="main-nav" aria-label="Navegacao principal">
+        <a class="nav-link active" href="/">Consultoria</a>
+        <a class="nav-link" href="/painel#importacoes">Importacoes</a>
+        <a class="nav-link" href="/painel#categorias">Categorias</a>
+      </nav>
+
+    </header>
+
+    <main class="page-shell">
+      <div class="workspace-tabs" role="tablist" aria-label="Areas da consultoria">
+        <button type="button" class="workspace-tab active" id="consultingTab" aria-controls="consultingPanel" aria-selected="true">Consultoria</button>
+        <button type="button" class="workspace-tab" id="dashboardTab" aria-controls="dashboardPanel" aria-selected="false">Dashboard</button>
+      </div>
+
+      <section class="workspace-panel active" id="consultingPanel" role="tabpanel" aria-labelledby="consultingTab">
+        <div class="workspace" aria-label="Consultoria financeira">
+          <form id="financeForm" class="panel form-panel">
+          <div class="section-heading">
+            <div>
+              <span class="step">01</span>
+              <p class="section-kicker">Sua entrada</p>
+              <h2>Conte um pouco sobre voce</h2>
+            </div>
+            <small>Campos marcados sao obrigatorios</small>
+          </div>
+
+          <div class="form-grid">
+            <label class="import-select-field">
+              <span>Usar faturas importadas</span>
+              <select id="importSelect" name="importSelect" multiple size="4">
+                <option value="">Carregando importacoes...</option>
+              </select>
+              <small id="importSummary">Selecione uma ou mais faturas para preencher os valores automaticamente.</small>
+            </label>
+            <label>
+              <span>Salario mensal</span>
+              <span class="money-field"><small>R$</small><input name="income" type="number" min="0" step="0.01" value="2500" required /></span>
+            </label>
+            <label>
+              <span>Reserva atual</span>
+              <span class="money-field"><small>R$</small><input name="reserve" type="number" min="0" step="0.01" value="3000" required /></span>
+            </label>
+            <label>
+              <span>Idade</span>
+              <input name="age" type="number" min="18" max="120" value="24" required />
+            </label>
+            <label>
+              <span>Dividas mensais</span>
+              <span class="money-field"><small>R$</small><input name="monthlyDebt" type="number" min="0" step="0.01" value="0" required /></span>
+            </label>
+            <fieldset class="choice-field">
+              <legend>Estabilidade da renda</legend>
+              <div class="choice-group">
+                <label><input type="radio" name="stability" value="baixa" required /><span>Baixa</span></label>
+                <label><input type="radio" name="stability" value="media" checked required /><span>Media</span></label>
+                <label><input type="radio" name="stability" value="alta" required /><span>Alta</span></label>
+              </div>
+            </fieldset>
+            <fieldset class="choice-field">
+              <legend>Perfil de investimento</legend>
+              <div class="choice-group">
+                <label><input type="radio" name="riskProfile" value="conservador" checked required /><span>Conservador</span></label>
+                <label><input type="radio" name="riskProfile" value="moderado" required /><span>Moderado</span></label>
+                <label><input type="radio" name="riskProfile" value="arrojado" required /><span>Arrojado</span></label>
+              </div>
+            </fieldset>
+          </div>
+
+          <div class="expenses-section">
+            <div class="expenses-heading">
+              <div>
+                <p class="section-kicker">Mapa de despesas</p>
+                <h3>Gastos mensais</h3>
+                <small id="expenseCount">4 gastos exibidos</small>
+              </div>
+              <button type="button" class="text-button" id="addExpense">+ Adicionar gasto</button>
+            </div>
+            <div class="expense-labels" aria-hidden="true"><span>Categoria / transacao</span><span>Valor mensal</span></div>
+            <div id="expensesList" class="expenses-list">
+              <div class="expense-row">
+                <input data-category value="Moradia" aria-label="Categoria da despesa" required />
+                <span class="money-field"><small>R$</small><input data-value type="number" min="0" step="0.01" value="800" aria-label="Valor da despesa" required /></span>
+              </div>
+              <div class="expense-row">
+                <input data-category value="Alimentacao" aria-label="Categoria da despesa" required />
+                <span class="money-field"><small>R$</small><input data-value type="number" min="0" step="0.01" value="500" aria-label="Valor da despesa" required /></span>
+              </div>
+              <div class="expense-row">
+                <input data-category value="Transporte" aria-label="Categoria da despesa" required />
+                <span class="money-field"><small>R$</small><input data-value type="number" min="0" step="0.01" value="200" aria-label="Valor da despesa" required /></span>
+              </div>
+              <div class="expense-row">
+                <input data-category value="Lazer" aria-label="Categoria da despesa" required />
+                <span class="money-field"><small>R$</small><input data-value type="number" min="0" step="0.01" value="300" aria-label="Valor da despesa" required /></span>
+              </div>
+            </div>
+          </div>
+
+          <fieldset class="choice-field goals-choice">
+            <legend>Objetivos principais</legend>
+            <div class="choice-group objective-group">
+              <label><input type="checkbox" name="goal" value="Montar reserva de emergencia" checked /><span>Reserva de emergencia</span></label>
+              <label><input type="checkbox" name="goal" value="Quitar dividas" /><span>Quitar dividas</span></label>
+              <label><input type="checkbox" name="goal" value="Organizar gastos mensais" /><span>Organizar gastos</span></label>
+              <label><input type="checkbox" name="goal" value="Comecar a investir" /><span>Comecar a investir</span></label>
+              <label><input type="checkbox" name="goal" value="Comprar um bem" /><span>Comprar um bem</span></label>
+              <label><input type="checkbox" name="goal" value="Planejar aposentadoria" /><span>Aposentadoria</span></label>
+            </div>
+          </fieldset>
+
+          <label class="goals-field">
+            <span>Detalhe dos objetivos ou preocupacoes</span>
+            <textarea name="goalDetails" maxlength="500" placeholder="Ex.: quero montar uma reserva de emergencia, organizar meus gastos e comecar a investir."></textarea>
+            <small><span id="goalCount">0</span>/500 caracteres</small>
+          </label>
+
+          <div class="form-actions">
+            <p>A IA recebera somente o resumo financeiro preenchido neste formulario.</p>
+            <button class="primary-button" id="submitButton" type="submit">Analisar minhas financas <span aria-hidden="true">-&gt;</span></button>
+          </div>
+          <div class="form-error" id="formError" role="alert" hidden></div>
+          </form>
         </div>
       </section>
 
-      <section class="workspace">
-        <form id="financeForm" class="panel form-panel">
-          <div class="form-grid">
-            <label>
-              Salario mensal
-              <input type="number" name="income" min="0" step="0.01" value="2500" required />
-            </label>
-            <label>
-              Reserva atual
-              <input type="number" name="reserve" min="0" step="0.01" value="3000" required />
-            </label>
-            <label>
-              Idade
-              <input type="number" name="age" min="1" value="24" required />
-            </label>
-            <label>
-              Dividas mensais
-              <input type="number" name="monthlyDebt" min="0" step="0.01" value="0" required />
-            </label>
-            <label>
-              Estabilidade
-              <select name="stability">
-                <option value="media">Media</option>
-                <option value="alta">Alta</option>
-                <option value="baixa">Baixa</option>
-              </select>
-            </label>
-            <label>
-              Perfil
-              <select name="riskProfile">
-                <option value="conservador">Conservador</option>
-                <option value="moderado">Moderado</option>
-                <option value="arrojado">Arrojado</option>
-              </select>
-            </label>
+      <section class="workspace-panel" id="dashboardPanel" role="tabpanel" aria-labelledby="dashboardTab" hidden>
+        <div class="dashboard-grid">
+          <div class="dashboard-metrics" id="dashboardMetrics">
+            <article><span>Receita</span><strong id="dashboardIncome">R$ 0,00</strong></article>
+            <article><span>Total de gastos</span><strong id="dashboardExpenses">R$ 0,00</strong></article>
+            <article><span>Saldo mensal</span><strong id="dashboardBalance">R$ 0,00</strong></article>
+            <article><span>Taxa de gastos</span><strong id="dashboardRate">0%</strong></article>
           </div>
 
-          <div class="expenses-header">
-            <h2>Gastos mensais</h2>
-            <button type="button" id="addExpenseButton">Adicionar</button>
-          </div>
+          <section class="panel dashboard-chart-panel" aria-labelledby="dashboardTitle">
+            <div class="chart-head">
+              <div>
+                <span class="step">03</span>
+                <p class="section-kicker">Dashboard</p>
+                <h2 id="dashboardTitle">Evolucao das saidas por categoria</h2>
+              </div>
+              <small id="chartHint">Use uma fatura importada ou preencha os gastos para visualizar.</small>
+            </div>
+            <canvas id="consultingChart" height="420" aria-label="Grafico financeiro"></canvas>
+            <div class="chart-legend" id="chartLegend"></div>
+          </section>
 
-          <div id="expensesList" class="expenses-list">
-            <div class="expense-row">
-              <input name="category" value="Aluguel" aria-label="Categoria" />
-              <input name="value" type="number" min="0" step="0.01" value="800" aria-label="Valor" />
+          <article class="panel chart-conclusion">
+            <div class="dashboard-answer-head">
+              <div>
+                <p class="section-kicker">Conclusao da IA</p>
+                <h2 id="resultTitle">Seu diagnostico financeiro</h2>
+              </div>
+              <div class="dashboard-answer-actions">
+                <span class="result-status" id="resultStatus">Aguardando</span>
+                <button class="export-pdf-button" id="exportPdfButton" type="button" disabled>Exportar PDF</button>
+              </div>
             </div>
-            <div class="expense-row">
-              <input name="category" value="Comida" aria-label="Categoria" />
-              <input name="value" type="number" min="0" step="0.01" value="500" aria-label="Valor" />
+            <div id="chartConclusion">
+              <div class="answer-placeholder" id="answerPlaceholder">
+                <span aria-hidden="true">IA</span>
+                <h3>A resposta aparecera aqui</h3>
+                <p>Preencha o formulario e envie os dados para receber uma analise objetiva.</p>
+              </div>
+              <div class="answer" id="answer" aria-live="polite" hidden></div>
             </div>
-            <div class="expense-row">
-              <input name="category" value="Lazer" aria-label="Categoria" />
-              <input name="value" type="number" min="0" step="0.01" value="300" aria-label="Valor" />
-            </div>
-            <div class="expense-row">
-              <input name="category" value="Transporte" aria-label="Categoria" />
-              <input name="value" type="number" min="0" step="0.01" value="200" aria-label="Valor" />
-            </div>
-            <div class="expense-row">
-              <input name="category" value="Outros" aria-label="Categoria" />
-              <input name="value" type="number" min="0" step="0.01" value="400" aria-label="Valor" />
-            </div>
-          </div>
-
-          <button class="primary-button" type="submit">Analisar financas</button>
-        </form>
-
-        <section class="results">
-          <div class="panel metrics-panel">
-            <div>
-              <span>Total de gastos</span>
-              <strong id="totalExpenses">R$ --</strong>
-            </div>
-            <div>
-              <span>Sobra mensal</span>
-              <strong id="monthlyBalance">R$ --</strong>
-            </div>
-            <div>
-              <span>Taxa de gastos</span>
-              <strong id="spendingRate">--%</strong>
-            </div>
-            <div>
-              <span>Reserva</span>
-              <strong id="emergencyMonths">-- meses</strong>
-            </div>
-            <div>
-              <span>Endividamento</span>
-              <strong id="debtRate">--%</strong>
-            </div>
-          </div>
-
-          <div class="panel chart-panel">
-            <h2>Distribuicao de gastos</h2>
-            <canvas id="expensesChart" height="220"></canvas>
-          </div>
-
-          <article class="panel advice-panel">
-            <div class="advice-title">
-              <h2>Analise da IA</h2>
-              <span id="adviceSource">Aguardando</span>
-            </div>
-            <p id="adviceText">Preencha os dados e clique em analisar para receber o diagnostico.</p>
+            <p class="disclaimer">Conteudo educacional. Nao substitui aconselhamento financeiro profissional.</p>
           </article>
-        </section>
+        </div>
       </section>
     </main>
+
+    <footer class="site-footer">
+      <strong>Finora</strong>
+      <span>Projeto academico - Fundamentos de Inteligencia Artificial</span>
+    </footer>
   </body>
 </html>

@@ -1,21 +1,38 @@
 {
   "name": "consultor-financeiro-ia",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
   "description": "Aplicacao web de consultoria financeira com IA.",
-  "main": "src/server.js",
-  "scripts": {
-    "dev": "node src/server.js",
-    "start": "node src/server.js"
+  "engines": {
+    "node": ">=22.13.0"
   },
-  "keywords": [
-    "ia",
-    "financas",
-    "express"
-  ],
-  "author": "",
-  "license": "MIT",
+  "scripts": {
+    "dev": "node server.js",
+    "build": "next build",
+    "start": "node server.js",
+    "lint": "eslint ."
+  },
   "dependencies": {
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2"
+    "@tailwindcss/postcss": "latest",
+    "@types/pg": "^8.20.0",
+    "cors": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "next": "latest",
+    "pdfjs-dist": "^6.0.227",
+    "pg": "^8.22.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "tailwindcss": "latest",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "eslint": "latest",
+    "eslint-config-next": "latest",
+    "typescript": "latest"
   }
 }
