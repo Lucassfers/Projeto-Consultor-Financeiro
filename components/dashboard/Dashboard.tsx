@@ -65,6 +65,7 @@ export default function Dashboard({ onImport }: DashboardProps) {
   const importExpense = selectedTransactions.filter((item) => item.type === "expense").reduce((sum, item) => sum + Number(item.amount), 0);
 
   async function generateDiagnosis() {
+    if (diagnosing) return;
     if (!selectedImport || !selectedTransactions.length) return setDiagnosisError("Esta importacao nao possui transacoes disponiveis para analise.");
     setDiagnosing(true); setDiagnosis(""); setDiagnosisError("");
     const summaries = categorySummary(selectedTransactions, categoryOptions).slice(0, 8).map((item) => `${item.name}: ${formatCurrency(item.value)}`).join("; ");
@@ -79,7 +80,7 @@ export default function Dashboard({ onImport }: DashboardProps) {
       .replace("{balance}", formatCurrency(importIncome - importExpense))
       .replace("{categorySummaries}", summaries || "sem categorias")
       .replace("{largestExpenses}", largest || "nenhum")
-      .slice(0, 2000);
+      .slice(0, 1600);
     try { const result = await api.diagnosis.create(prompt); setDiagnosis(result.resposta); }
     catch (cause) { setDiagnosisError(cause instanceof Error ? cause.message : "Nao foi possivel gerar o diagnostico."); }
     finally { setDiagnosing(false); }

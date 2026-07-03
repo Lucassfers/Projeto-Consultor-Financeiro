@@ -3,15 +3,23 @@ import cors from "cors";
 import "dotenv/config";
 import next from "next";
 import pg from "pg";
+import crypto from "node:crypto";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const API_KEY = process.env.OPENROUTER_API_KEY;
 const DATABASE_URL = process.env.DATABASE_URL;
 const MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-oss-120b:free";
+const LLM_TIMEOUT_MS = Number(process.env.OPENROUTER_TIMEOUT_MS || 90000);
+const LLM_CACHE_TTL_MS = Number(process.env.OPENROUTER_CACHE_TTL_MS || 15 * 60 * 1000);
+const LLM_PROMPT_CHAR_LIMIT = Number(process.env.OPENROUTER_PROMPT_CHAR_LIMIT || 1400);
+const LLM_RESPONSE_TOKEN_LIMIT = Number(process.env.OPENROUTER_RESPONSE_TOKENS || 260);
+const LLM_REPORT_VERSION = "financial-actions-v2";
 const isDevelopment = process.env.NODE_ENV !== "production";
 const nextApp = next({ dev: isDevelopment, hostname: "localhost", port: PORT });
 const handleNextRequest = nextApp.getRequestHandler();
+const llmCache = new Map();
+const pendingLlmRequests = new Map();
 
 if (!API_KEY) {
   console.error("Erro: configure OPENROUTER_API_KEY no arquivo .env.");
@@ -88,6 +96,10 @@ await nextApp.prepare();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static("public"));
+
+app.get("/favicon.ico", (_request, response) => {
+  response.status(204).end();
+});
 
 app.get("/api/categories", async (_request, response) => {
   try {
@@ -274,7 +286,13 @@ app.put("/api/imports/:id/transactions", async (request, response) => {
 });
 
 app.get("/api/status", (_request, response) => {
-  response.json({ status: "API local funcionando", model: MODEL });
+  response.json({
+    status: "API local funcionando",
+    model: MODEL,
+    promptLimit: LLM_PROMPT_CHAR_LIMIT,
+    responseTokenLimit: LLM_RESPONSE_TOKEN_LIMIT,
+    reportVersion: LLM_REPORT_VERSION,
+  });
 });
 
 function sanitizeLlmResponseLegacy(text) {
@@ -293,7 +311,147 @@ function sanitizeLlmResponse(text) {
     .trim();
 }
 
+function extractOpenRouterMessage(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  if (typeof payload.error === "string") return payload.error;
+  if (typeof payload.error?.message === "string") return payload.error.message;
+  if (typeof payload.detail === "string") return payload.detail;
+  if (typeof payload.message === "string") return payload.message;
+  return "";
+}
+
+function openRouterErrorHint(status, detail) {
+  const text = String(detail || "").toLowerCase();
+  if (status === 401 || status === 403) return "Chave do OpenRouter invalida, sem permissao ou sem acesso a este modelo.";
+  if (status === 402 || text.includes("credit") || text.includes("quota")) return "Credito ou cota do OpenRouter acabou. Confira saldo/limite da conta.";
+  if (status === 429 || text.includes("rate limit") || text.includes("provider returned error")) {
+    return "O modelo gratuito/provedor do OpenRouter recusou por limite ou alta demanda. Aguarde alguns minutos, tente de novo ou use outro modelo na variavel OPENROUTER_MODEL.";
+  }
+  if (status === 400 && (text.includes("context") || text.includes("token") || text.includes("maximum"))) return "A mensagem ficou grande demais para o modelo. O app agora envia um resumo menor; se persistir, troque o modelo gratuito ou reduza faturas selecionadas.";
+  if (status >= 500) return "O OpenRouter ou o provedor do modelo esta instavel no momento. Tente novamente ou troque o modelo.";
+  return detail || `HTTP ${status}`;
+}
+
+function shouldUseLocalFallback(status, detail) {
+  const text = String(detail || "").toLowerCase();
+  return status === 429 || text.includes("provider returned error") || text.includes("rate limit");
+}
+
+function parseBrazilianCurrency(value) {
+  const normalized = String(value || "")
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function parsePromptLine(prompt, label) {
+  const pattern = new RegExp(`^${label}:\\s*(.+)$`, "im");
+  return prompt.match(pattern)?.[1]?.trim() || "";
+}
+
+function parseExpenseLines(prompt) {
+  const section = prompt.match(/Gastos por categoria, ja somados:\s*([\s\S]*?)\n\nObjetivos principais selecionados:/i)?.[1] || "";
+  return section
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^-\s*/, "").trim())
+    .map((line) => {
+      const [category, value] = line.split(/:\s*/);
+      return { category: category || "Outros", value: parseBrazilianCurrency(value) };
+    })
+    .filter((item) => item.category && item.value > 0);
+}
+
+function currency(value) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
+}
+
+function buildLocalFinancialReport(prompt) {
+  const income = parseBrazilianCurrency(parsePromptLine(prompt, "Renda mensal"));
+  const reserve = parseBrazilianCurrency(parsePromptLine(prompt, "Reserva atual"));
+  const totalExpenses = parseBrazilianCurrency(parsePromptLine(prompt, "Total de gastos"));
+  const monthlyBalance = parseBrazilianCurrency(parsePromptLine(prompt, "Saldo mensal"));
+  const spendingRate = Number(parsePromptLine(prompt, "Taxa de gastos").replace(",", ".").replace(/[^\d.-]/g, "")) || 0;
+  const emergencyMonths = Number(parsePromptLine(prompt, "Reserva cobre").replace(",", ".").replace(/[^\d.-]/g, "")) || 0;
+  const riskProfile = parsePromptLine(prompt, "Perfil de investimento") || "nao informado";
+  const stability = parsePromptLine(prompt, "Estabilidade da renda") || "nao informada";
+  const goals = parsePromptLine(prompt, "Objetivos principais selecionados") || "nao informado";
+  const expenses = parseExpenseLines(prompt).sort((first, second) => second.value - first.value);
+  const mainExpense = expenses[0];
+  const balanceTone = monthlyBalance >= 0 ? "positivo" : "negativo";
+  const reserveTone = emergencyMonths >= 6 ? "boa" : emergencyMonths >= 3 ? "em formacao" : "baixa";
+  const minimumSavingsTarget = Math.max(income * 0.02, 20);
+  const suggestedSavingsTarget = monthlyBalance > 0
+    ? Math.min(Math.max(minimumSavingsTarget, monthlyBalance * 0.2), monthlyBalance)
+    : minimumSavingsTarget;
+  const expenseCutTarget = mainExpense ? Math.max(mainExpense.value * 0.05, 20) : Math.max(totalExpenses * 0.03, 20);
+  const surpriseFundTarget = Math.max(income * 0.02, totalExpenses * 0.03, 30);
+  const priority = monthlyBalance < 0
+    ? "reduzir gastos e recuperar saldo positivo"
+    : emergencyMonths < 3
+      ? "montar reserva antes de assumir risco"
+      : "organizar aportes de acordo com o objetivo";
+  const variableIncomeUse = monthlyBalance > 0 && emergencyMonths >= 6 && riskProfile !== "conservador" ? "Media" : "Baixa";
+
+  return [
+    "## Diagnostico",
+    `Seu saldo mensal esta ${balanceTone}: ${currency(monthlyBalance)}. A renda informada e ${currency(income)} e os gastos somam ${currency(totalExpenses)}.`,
+    `A reserva cobre cerca de ${emergencyMonths.toFixed(1)} meses de gastos, uma situacao ${reserveTone}. Objetivos: ${goals}.`,
+    "",
+    "## Pontos de atencao",
+    `- Taxa de gastos em ${spendingRate.toFixed(1)}%; acompanhe para manter espaco para reserva e objetivos.`,
+    `- Principal gasto mapeado: ${mainExpense ? `${mainExpense.category} (${currency(mainExpense.value)})` : "nenhuma categoria relevante informada"}.`,
+    `- Estabilidade da renda: ${stability}; perfil de investimento: ${riskProfile}.`,
+    "",
+    "## Caminhos de investimento personalizados",
+    "| Classe | Motivo | Uso recomendado |",
+    "| --- | --- | --- |",
+    `| Reserva em renda fixa liquida | Ajuda a proteger o orcamento antes de assumir risco. | ${emergencyMonths < 6 ? "Alta" : "Media"} |`,
+    `| Tesouro Selic, CDB com liquidez ou fundo DI simples | Combina com reserva e objetivos de curto prazo. | ${monthlyBalance > 0 ? "Alta" : "Media"} |`,
+    `| Renda variavel diversificada | So faz sentido depois de reserva e saldo mensal sob controle. | ${variableIncomeUse} |`,
+    "",
+    "## Plano de acao",
+    "| Etapa | Acao | Prazo |",
+    "| --- | --- | --- |",
+    `| 1 | Priorizar ${priority}. | 30 dias |`,
+    "| 2 | Revisar as maiores categorias e definir um teto mensal. | 60 dias |",
+    "| 3 | Automatizar um aporte apenas se o saldo mensal continuar positivo. | 90 dias |",
+    "",
+    "## Proximos passos",
+    `- Economize ao menos 2% da renda: separe ${currency(suggestedSavingsTarget)} por mes assim que receber, antes dos gastos variaveis.`,
+    `- Reduza gastos com imprevistos: reserve ${currency(surpriseFundTarget)} por mes para pequenas emergencias e evite parcelar despesas inesperadas.`,
+    `- Corte uma categoria prioritaria: diminua ${mainExpense ? `${mainExpense.category} em cerca de ${currency(expenseCutTarget)}` : `gastos variaveis em cerca de ${currency(expenseCutTarget)}`} no proximo mes e acompanhe se o saldo melhora.`,
+  ].join("\n");
+}
+
+function llmCacheKey(prompt) {
+  return crypto.createHash("sha256").update(`${LLM_REPORT_VERSION}\n${MODEL}\n${prompt.trim()}`).digest("hex");
+}
+
+function getCachedLlmResponse(key) {
+  const cached = llmCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.createdAt > LLM_CACHE_TTL_MS) {
+    llmCache.delete(key);
+    return null;
+  }
+  return cached.value;
+}
+
+function setCachedLlmResponse(key, value) {
+  llmCache.set(key, { createdAt: Date.now(), value });
+  if (llmCache.size > 30) {
+    const oldestKey = llmCache.keys().next().value;
+    if (oldestKey) llmCache.delete(oldestKey);
+  }
+}
+
 app.post("/api/llm", async (request, response) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  const startedAt = Date.now();
+
   try {
     const { prompt } = request.body ?? {};
 
@@ -301,63 +459,131 @@ app.post("/api/llm", async (request, response) => {
       return response.status(400).json({ erro: "O campo prompt e obrigatorio." });
     }
 
-    if (prompt.length > 2000) {
-      return response.status(400).json({ erro: "Limite: 2000 caracteres." });
+    if (prompt.length > LLM_PROMPT_CHAR_LIMIT) {
+      return response.status(400).json({ erro: `Limite: ${LLM_PROMPT_CHAR_LIMIT} caracteres.` });
     }
 
-    const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${API_KEY}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.OPENROUTER_SITE_URL || `http://localhost:${PORT}`,
-        "X-OpenRouter-Title": "Finora - Projeto FIA ADS",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          {
-            role: "system",
-            content: [
-              "Voce e um consultor financeiro educacional brasileiro.",
-              "Analise somente os dados fornecidos e nao invente valores.",
-              "Responda de forma objetiva, didatica e responsavel.",
-              "Quando falar de investimentos, sugira classes, indices ou veiculos educacionais adequados ao perfil e objetivo, como renda fixa, Tesouro Direto, CDB, LCI/LCA, fundos DI, fundos/ETFs ligados ao Ibovespa, FIIs, previdencia ou acoes.",
-              "Explique o motivo de cada sugestao e destaque quando reserva, dividas ou estabilidade devem vir antes de renda variavel.",
-              "Organize a resposta em: diagnostico, pontos de atencao, caminhos de investimento personalizados, plano de acao e proximos passos.",
-              "Nao prometa rentabilidade.",
-            ].join(" "),
-          },
-          { role: "user", content: prompt.trim() },
-        ],
-        temperature: 0.7,
-        max_completion_tokens: 700,
-      }),
-    });
+    const promptText = prompt.trim();
+    const cacheKey = llmCacheKey(promptText);
+    const cached = getCachedLlmResponse(cacheKey);
+    if (cached) {
+      console.info(`[llm] Resposta reutilizada do cache. modelo=${MODEL} prompt=${promptText.length}`);
+      return response.json({ ...cached, cached: true });
+    }
 
-    if (!openRouterResponse.ok) {
-      const detalhe = await openRouterResponse.text();
-      return response.status(502).json({
-        erro: "Erro ao consultar o OpenRouter.",
-        status: openRouterResponse.status,
-        detalhe,
+    const pending = pendingLlmRequests.get(cacheKey);
+    if (pending) {
+      console.info(`[llm] Aguardando requisicao identica ja em andamento. modelo=${MODEL} prompt=${promptText.length}`);
+      const result = await pending;
+      return response.json({ ...result, cached: true });
+    }
+
+    const requestPromise = (async () => {
+      console.info(`[llm] Consultando OpenRouter. modelo=${MODEL} prompt=${promptText.length} timeout=${LLM_TIMEOUT_MS}ms`);
+
+      const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${API_KEY}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": process.env.OPENROUTER_SITE_URL || `http://localhost:${PORT}`,
+          "X-OpenRouter-Title": "Finora - Projeto FIA ADS",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [
+            {
+              role: "system",
+              content: [
+                "Voce e um consultor financeiro educacional brasileiro.",
+                "Use somente os dados enviados, nao invente valores e responda em pt-BR.",
+                "Se sugerir investimentos, cite classes brasileiras adequadas ao perfil e priorize reserva/dividas quando necessario.",
+                "Seja objetivo e nao prometa rentabilidade.",
+              ].join(" "),
+            },
+            { role: "user", content: promptText },
+          ],
+          temperature: 0.4,
+          max_tokens: LLM_RESPONSE_TOKEN_LIMIT,
+        }),
+      });
+
+      const rawBody = await openRouterResponse.text();
+      let data = {};
+      try {
+        data = rawBody ? JSON.parse(rawBody) : {};
+      } catch {
+        data = {};
+      }
+
+      if (!openRouterResponse.ok) {
+        const detalhe = extractOpenRouterMessage(data) || rawBody || `HTTP ${openRouterResponse.status}`;
+        const dica = openRouterErrorHint(openRouterResponse.status, detalhe);
+        console.error(`[llm] OpenRouter recusou a consulta. status=${openRouterResponse.status} detalhe=${detalhe}`);
+        if (shouldUseLocalFallback(openRouterResponse.status, detalhe)) {
+          const result = {
+            modelo: `${MODEL} (fallback local)`,
+            resposta: buildLocalFinancialReport(promptText),
+            uso: data.usage ?? null,
+            fallback: true,
+            dica,
+          };
+          console.info(`[llm] Fallback local gerado em ${Date.now() - startedAt}ms. motivo=${detalhe}`);
+          return result;
+        }
+        const error = new Error(detalhe);
+        error.statusCode = openRouterResponse.status === 429 ? 429 : 502;
+        error.body = {
+          erro: "Erro ao consultar o OpenRouter.",
+          status: openRouterResponse.status,
+          detalhe,
+          dica,
+        };
+        throw error;
+      }
+
+      const text = data.choices?.[0]?.message?.content;
+      if (!text) {
+        const error = new Error("Resposta vazia ou inesperada.");
+        error.statusCode = 502;
+        error.body = { erro: "Resposta vazia ou inesperada." };
+        throw error;
+      }
+
+      const result = { modelo: MODEL, resposta: sanitizeLlmResponse(text), uso: data.usage ?? null };
+      setCachedLlmResponse(cacheKey, result);
+      console.info(`[llm] Analise concluida em ${Date.now() - startedAt}ms.`);
+      return result;
+    })();
+
+    pendingLlmRequests.set(cacheKey, requestPromise);
+    try {
+      const result = await requestPromise;
+      return response.json(result);
+    } finally {
+      pendingLlmRequests.delete(cacheKey);
+    }
+  } catch (error) {
+    if (error?.statusCode && error?.body) {
+      return response.status(error.statusCode).json(error.body);
+    }
+
+    if (error?.name === "AbortError") {
+      console.error(`[llm] Tempo limite excedido apos ${LLM_TIMEOUT_MS}ms.`);
+      return response.status(504).json({
+        erro: "A consulta demorou demais para responder. Tente novamente ou altere o modelo do OpenRouter.",
+        detalhe: `Tempo limite: ${Math.round(LLM_TIMEOUT_MS / 1000)} segundos.`,
       });
     }
 
-    const data = await openRouterResponse.json();
-    const text = data.choices?.[0]?.message?.content;
-
-    if (!text) {
-      return response.status(502).json({ erro: "Resposta vazia ou inesperada." });
-    }
-
-    return response.json({ modelo: MODEL, resposta: sanitizeLlmResponse(text), uso: data.usage ?? null });
-  } catch (error) {
     console.error("Erro interno ao consultar o OpenRouter:", error);
     return response.status(500).json({
       erro: "Erro interno no servidor.",
       detalhe: error instanceof Error ? error.message : "Erro desconhecido.",
     });
+  } finally {
+    clearTimeout(timeout);
   }
 });
 

@@ -6,6 +6,7 @@ const formError = document.querySelector("#formError");
 const answer = document.querySelector("#answer");
 const answerPlaceholder = document.querySelector("#answerPlaceholder");
 const resultStatus = document.querySelector("#resultStatus");
+const exportPdfButton = document.querySelector("#exportPdfButton");
 const consultingTab = document.querySelector("#consultingTab");
 const dashboardTab = document.querySelector("#dashboardTab");
 const consultingPanel = document.querySelector("#consultingPanel");
@@ -26,11 +27,13 @@ let savedImports = [];
 let savedTransactions = [];
 let savedExpenseCategories = [];
 let savedCategories = [];
+let analysisInFlight = false;
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
 });
+const MAX_LLM_PROMPT_CHARS = 1400;
 
 const FINANCIAL_DIAGNOSIS_PROMPT = `
 Analise meu momento financeiro com base apenas nos dados abaixo.
@@ -44,27 +47,24 @@ Perfil de investimento: {riskProfile}
 Total de gastos: {totalExpenses}
 Saldo mensal: {monthlyBalance}
 Taxa de gastos: {spendingRate}%
-Reserva cobre: {emergencyMonths} meses
+Reserva cobre: {emergencyMonths} meses de gastos
 
-Gastos por categoria:
+Gastos por categoria, ja somados:
 {expenseLines}
 
 Objetivos principais selecionados: {goals}
 Detalhe do objetivo: {goalDetails}
 
-Adapte as dicas financeiras ao conjunto de objetivos selecionados e ao perfil do usuario.
-Quando houver objetivos simultaneos, organize prioridades e explique o que vem antes, o que pode andar em paralelo e o que deve esperar.
+Responda curto, em Markdown, sem disclaimer final. Use exatamente:
+## Diagnostico
+## Pontos de atencao
+## Caminhos de investimento personalizados
+## Plano de acao
+## Proximos passos
 
-Inclua uma secao chamada Caminhos de investimento personalizados.
-Nessa secao, indique tipos de investimento ou referencias brasileiras que combinam com o perfil e o objetivo, como Tesouro Direto, CDB, LCI/LCA, fundos DI, fundos/ETFs ligados ao Ibovespa, FIIs, previdencia privada ou acoes, quando fizer sentido.
-Explique por que cada caminho combina ou nao combina com a situacao, sem prometer rentabilidade e sem tratar como ordem de compra.
-Se houver saldo negativo, reserva baixa ou dividas altas, priorize quitar dividas e formar reserva antes de sugerir renda variavel.
-
-Responda em Markdown padronizado, com estes titulos exatos: ## Diagnostico, ## Pontos de atencao, ## Caminhos de investimento personalizados, ## Plano de acao, ## Proximos passos.
-Em Caminhos de investimento personalizados, use uma tabela com as colunas: Classe de investimento | Por que combina (ou nao) | Uso recomendado na sua situacao.
-Em Plano de acao, use uma tabela com as colunas: Etapa | Acao | Prazo. Em Pontos de atencao e Proximos passos, use topicos curtos.
-Nao escreva linhas soltas ou quebradas como | 1 |, | 2 | ou pipes sem cabecalho. Toda tabela deve ter cabecalho completo.
-Nao inclua frases finais de aviso legal ou disclaimer profissional.
+Em investimentos, indique no maximo 3 caminhos brasileiros e priorize reserva/dividas antes de renda variavel quando necessario.
+Use tabelas pequenas: investimentos com Classe | Motivo | Uso recomendado; plano com Etapa | Acao | Prazo.
+Em Proximos passos, escreva exatamente 3 topicos praticos em formato "Acao: detalhe", com metas numericas quando possivel, como economizar um percentual da renda, reduzir uma categoria de gasto ou separar valor para imprevistos.
 `.trim();
 
 async function loadImportedStatements() {
@@ -127,21 +127,23 @@ function buildExpenseCategories(categories, transactions) {
 
 function renderImportOptions() {
   importSelect.innerHTML = "";
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = savedImports.length ? "Preencher manualmente" : "Nenhuma importacao encontrada";
-  importSelect.appendChild(placeholder);
+  if (!savedImports.length) {
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Nenhuma importacao encontrada";
+    importSelect.appendChild(placeholder);
+  }
 
   savedImports.forEach((item) => {
     const option = document.createElement("option");
     option.value = item.id;
-    option.textContent = item.fileName;
+    option.textContent = [item.fileName, item.statementMonth ? monthLabel(item.statementMonth) : ""].filter(Boolean).join(" - ");
     importSelect.appendChild(option);
   });
 
   importSelect.disabled = !savedImports.length;
   importSummary.textContent = savedImports.length
-    ? "Selecione uma fatura para preencher salario, dividas e reserva."
+    ? "Selecione uma ou mais faturas para preencher salario, dividas e reserva."
     : "Confirme uma importacao na pagina Importacoes para usar este preenchimento.";
 }
 
@@ -207,16 +209,32 @@ function refreshExpenseCategoryDropdowns() {
   });
 }
 
-function applyImportedStatement(importId) {
-  const selectedImport = savedImports.find((item) => item.id === importId);
-  if (!selectedImport) {
+function selectedImportIds() {
+  return [...importSelect.selectedOptions].map((option) => option.value).filter(Boolean);
+}
+
+function selectedImports() {
+  const ids = new Set(selectedImportIds());
+  return savedImports.filter((item) => ids.has(item.id));
+}
+
+function selectedImportExpenseTransactions() {
+  const ids = new Set(selectedImportIds());
+  if (!ids.size) return [];
+  return savedTransactions.filter((item) => ids.has(item.importId) && item.type === "expense");
+}
+
+function applyImportedStatement(importIds = selectedImportIds()) {
+  const ids = new Set(importIds);
+  const imports = savedImports.filter((item) => ids.has(item.id));
+  if (!imports.length) {
     importSummary.textContent = savedImports.length
-      ? "Selecione uma fatura para preencher salario, dividas e reserva."
+      ? "Selecione uma ou mais faturas para preencher salario, dividas e reserva."
       : "Confirme uma importacao na pagina Importacoes para usar este preenchimento.";
     return;
   }
 
-  const transactions = savedTransactions.filter((item) => item.importId === selectedImport.id);
+  const transactions = savedTransactions.filter((item) => ids.has(item.importId));
   const income = transactions
     .filter((item) => item.type === "income")
     .reduce((sum, item) => sum + Number(item.amount), 0);
@@ -241,7 +259,7 @@ function applyImportedStatement(importId) {
   setMoneyValue("monthlyDebt", expenses);
   setMoneyValue("reserve", income - expenses);
   replaceExpenses(expenseTransactions);
-  importSummary.textContent = `${selectedImport.fileName}: ${expenseTransactions.length} transacoes de saida, entradas ${currencyFormatter.format(income)}, saidas ${currencyFormatter.format(expenses)}, sobra ${currencyFormatter.format(income - expenses)}.`;
+  importSummary.textContent = `${imports.length} fatura${imports.length === 1 ? "" : "s"} selecionada${imports.length === 1 ? "" : "s"}: ${expenseTransactions.length} transacoes de saida, entradas ${currencyFormatter.format(income)}, saidas ${currencyFormatter.format(expenses)}, sobra ${currencyFormatter.format(income - expenses)}.`;
   const financialData = collectFinancialData();
   renderDashboardMetrics(financialData);
   renderConsultingChart(financialData);
@@ -312,8 +330,29 @@ function truncatePromptField(text, maxLength) {
   return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
 }
 
+function summarizeExpensesForPrompt(expenses) {
+  const totalsByCategory = new Map();
+  expenses.forEach((item) => {
+    const category = item.category || "Sem categoria";
+    totalsByCategory.set(category, (totalsByCategory.get(category) || 0) + Number(item.value || 0));
+  });
+
+  const ranked = [...totalsByCategory.entries()]
+    .map(([category, value]) => ({ category, value }))
+    .filter((item) => item.value > 0)
+    .sort((first, second) => second.value - first.value);
+
+  if (!ranked.length) return "- Nenhuma despesa informada";
+
+  const visible = ranked.slice(0, 8);
+  const hiddenTotal = ranked.slice(8).reduce((sum, item) => sum + item.value, 0);
+  const lines = visible.map((item) => `- ${item.category}: ${currencyFormatter.format(item.value)}`);
+  if (hiddenTotal > 0) lines.push(`- Outras categorias: ${currencyFormatter.format(hiddenTotal)}`);
+  return lines.join("\n");
+}
+
 function buildPrompt(data) {
-  const expenseLines = data.expenses.map((item) => `- ${item.category}: ${currencyFormatter.format(item.value)}`).join("\n");
+  const expenseLines = summarizeExpensesForPrompt(data.expenses);
   const prompt = FINANCIAL_DIAGNOSIS_PROMPT
     .replace("{age}", data.age)
     .replace("{income}", currencyFormatter.format(data.income))
@@ -325,11 +364,11 @@ function buildPrompt(data) {
     .replace("{monthlyBalance}", currencyFormatter.format(data.monthlyBalance))
     .replace("{spendingRate}", data.spendingRate.toFixed(1))
     .replace("{emergencyMonths}", data.emergencyMonths.toFixed(1))
-    .replace("{expenseLines}", truncatePromptField(expenseLines || "- Nenhuma despesa informada", 360))
-    .replace("{goals}", truncatePromptField(data.goals.join("; ") || "nenhum", 220))
-    .replace("{goalDetails}", truncatePromptField(data.goalDetails || "nao informado", 260));
+    .replace("{expenseLines}", truncatePromptField(expenseLines, 360))
+    .replace("{goals}", truncatePromptField(data.goals.join("; ") || "nenhum", 140))
+    .replace("{goalDetails}", truncatePromptField(data.goalDetails || "nao informado", 160));
 
-  return prompt.slice(0, 2000);
+  return prompt.slice(0, MAX_LLM_PROMPT_CHARS);
 }
 
 function removeAiDisclaimer(text) {
@@ -366,6 +405,21 @@ function transactionMonth(transaction) {
   const [day, month, year] = String(transaction.date || "").split("/").map(Number);
   if (!day || !month || !year) return "";
   return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+function transactionDate(transaction) {
+  const [day, month, year] = String(transaction.date || "").split("/").map(Number);
+  if (!day || !month || !year) return null;
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.valueOf())) return null;
+  return date;
+}
+
+function daysBetween(startDate, endDate) {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const start = Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const end = Date.UTC(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+  return Math.max(0, Math.round((end - start) / dayMs));
 }
 
 function monthLabel(monthKey) {
@@ -451,7 +505,7 @@ function renderLegend(series) {
   });
 }
 
-function renderLineChart(series, months) {
+function renderLineChart(series, labels, formatLabel = monthLabel) {
   const { context, width, height } = setupChartCanvas();
   const bounds = { left: 74, right: 30, top: 30, areaH: 332, width };
   const areaW = Math.max(width - bounds.left - bounds.right, 1);
@@ -460,28 +514,31 @@ function renderLineChart(series, months) {
 
   series.forEach((item) => {
     const points = item.values.map((value, index) => ({
-      x: bounds.left + (months.length === 1 ? areaW / 2 : index * areaW / (months.length - 1)),
+      x: bounds.left + (labels.length === 1 ? areaW / 2 : index * areaW / (labels.length - 1)),
       y: bounds.top + bounds.areaH - value / max * bounds.areaH,
+      changed: item.changedIndexes?.has(index) ?? true,
     }));
     context.strokeStyle = item.color;
     context.lineWidth = 3;
     drawSmoothLine(context, points);
-    points.forEach((point) => {
+    points.filter((point, index) => point.changed || index === points.length - 1).forEach((point) => {
       context.beginPath();
       context.fillStyle = "#fffdf8";
       context.strokeStyle = item.color;
       context.lineWidth = 2;
-      context.arc(point.x, point.y, 4, 0, Math.PI * 2);
+      context.arc(point.x, point.y, 3.5, 0, Math.PI * 2);
       context.fill();
       context.stroke();
     });
   });
 
-  months.forEach((month, index) => {
-    const x = bounds.left + (months.length === 1 ? areaW / 2 : index * areaW / (months.length - 1));
+  const labelStep = Math.max(1, Math.ceil(labels.length / 8));
+  labels.forEach((label, index) => {
+    if (index !== 0 && index !== labels.length - 1 && index % labelStep !== 0) return;
+    const x = bounds.left + (labels.length === 1 ? areaW / 2 : index * areaW / (labels.length - 1));
     context.fillStyle = "#607169";
     context.textAlign = "center";
-    context.fillText(monthLabel(month), x, height - 20);
+    context.fillText(formatLabel(label), x, height - 20);
   });
   renderLegend(series);
 }
@@ -511,25 +568,127 @@ function renderBarChart(expenses) {
   renderLegend(items);
 }
 
+function renderExpenseLineChart(expenses) {
+  const totalsByCategory = new Map();
+  expenses.forEach((item) => {
+    const category = item.category || "Outros";
+    totalsByCategory.set(category, (totalsByCategory.get(category) || 0) + Number(item.value || 0));
+  });
+
+  const items = [...totalsByCategory.entries()]
+    .map(([category, value], index) => ({ category, value, color: categoryColor(category, index) }))
+    .filter((item) => item.value > 0)
+    .slice(0, 10);
+
+  const labels = items.map((item) => item.category);
+  const changedIndexes = new Set(labels.map((_, index) => index));
+  const series = [{
+    name: "Gastos por categoria",
+    color: "#6d5dfc",
+    values: items.map((item) => item.value),
+    changedIndexes,
+  }];
+
+  renderLineChart(series, labels, (label) => String(label).length > 10 ? `${String(label).slice(0, 9)}...` : label);
+}
+
+function buildMonthlyCumulativeSeries(datedTransactions, grouping) {
+  const labels = [...new Set(datedTransactions.map(transactionMonth).filter(Boolean))].sort();
+  const valuesByGroup = new Map();
+  datedTransactions.forEach((item) => {
+    const month = transactionMonth(item);
+    if (!month) return;
+    const group = grouping(item);
+    if (!valuesByGroup.has(group)) valuesByGroup.set(group, new Map());
+    const valuesByMonth = valuesByGroup.get(group);
+    valuesByMonth.set(month, (valuesByMonth.get(month) || 0) + Number(item.amount));
+  });
+
+  const series = [...valuesByGroup.entries()].map(([name, valuesByMonth], index) => {
+    let runningTotal = 0;
+    const changedIndexes = new Set();
+    const values = labels.map((label, labelIndex) => {
+      const monthValue = valuesByMonth.get(label) || 0;
+      if (monthValue > 0) changedIndexes.add(labelIndex);
+      runningTotal += monthValue;
+      return runningTotal;
+    });
+    return { name, color: categoryColor(name, index), values, total: runningTotal, changedIndexes };
+  }).filter((item) => item.total > 0).sort((first, second) => second.total - first.total).slice(0, 10);
+
+  return { labels, series, interval: "monthly" };
+}
+
+function buildDailyCumulativeSeries(transactions, grouping) {
+  const datedTransactions = transactions.map((item) => ({ ...item, parsedDate: transactionDate(item) })).filter((item) => item.parsedDate);
+  if (!datedTransactions.length) return { labels: [], series: [] };
+  const startDatesByImport = new Map();
+  datedTransactions.forEach((item) => {
+    const current = startDatesByImport.get(item.importId);
+    if (!current || item.parsedDate < current) startDatesByImport.set(item.importId, item.parsedDate);
+  });
+
+  const valuesByGroup = new Map();
+  const days = new Set([0]);
+  datedTransactions.forEach((item) => {
+    const startDate = startDatesByImport.get(item.importId);
+    const day = daysBetween(startDate, item.parsedDate) + 1;
+    days.add(day);
+    const group = grouping(item);
+    if (!valuesByGroup.has(group)) valuesByGroup.set(group, new Map());
+    const valuesByDay = valuesByGroup.get(group);
+    valuesByDay.set(day, (valuesByDay.get(day) || 0) + Number(item.amount));
+  });
+
+  const maxDay = Math.max(...days);
+  if (maxDay > 45) return buildMonthlyCumulativeSeries(datedTransactions, grouping);
+
+  const labels = [...days].sort((first, second) => first - second).map(String);
+  const series = [...valuesByGroup.entries()].map(([name, valuesByDay], index) => {
+    let runningTotal = 0;
+    const changedIndexes = new Set();
+    const values = labels.map((label, labelIndex) => {
+      const dayValue = valuesByDay.get(Number(label)) || 0;
+      if (dayValue > 0) changedIndexes.add(labelIndex);
+      runningTotal += dayValue;
+      return runningTotal;
+    });
+    return { name, color: categoryColor(name, index), values, total: runningTotal, changedIndexes };
+  }).filter((item) => item.total > 0).sort((first, second) => second.total - first.total).slice(0, 10);
+
+  return { labels, series, interval: "daily" };
+}
+
 function renderConsultingChart(financialData) {
   if (!consultingChart) return;
-  const expenseTransactions = savedTransactions.filter((item) => item.type === "expense");
+  const expenseTransactions = selectedImportExpenseTransactions();
   if (expenseTransactions.length) {
-    const months = [...new Set(expenseTransactions.map(transactionMonth).filter(Boolean))].sort();
-    const names = [...new Set(expenseTransactions.map((item) => item.category || "Outros"))];
-    const series = names.map((name, index) => {
-      const values = months.map((month) => expenseTransactions
-        .filter((item) => (item.category || "Outros") === name && transactionMonth(item) === month)
-        .reduce((sum, item) => sum + Number(item.amount), 0));
-      return { name, color: categoryColor(name, index), values, total: values.reduce((sum, value) => sum + value, 0) };
-    }).filter((item) => item.total > 0).sort((first, second) => second.total - first.total).slice(0, 10);
-    chartHint.textContent = `Calculado com ${months.length} mes${months.length === 1 ? "" : "es"} importado${months.length === 1 ? "" : "s"}.`;
-    renderLineChart(series, months);
+    const imports = selectedImports();
+    const multipleImports = imports.length > 1;
+    const importNames = new Map(imports.map((item, index) => [item.id, item.fileName || `Fatura ${index + 1}`]));
+    const dailyData = buildDailyCumulativeSeries(
+      expenseTransactions,
+      multipleImports ? (item) => item.importId : (item) => item.category || "Outros",
+    );
+    const series = multipleImports
+      ? dailyData.series.map((item) => ({ ...item, name: importNames.get(item.name) || item.name }))
+      : dailyData.series;
+    if (!dailyData.labels.length || !series.length) {
+      chartHint.textContent = "Nao foi possivel ler datas validas nas faturas; exibindo linha por categoria.";
+      renderExpenseLineChart(financialData.expenses);
+      return;
+    }
+    chartHint.textContent = multipleImports
+      ? `Comparando ${imports.length} faturas selecionadas ${dailyData.interval === "monthly" ? "por mes" : "a partir do Dia 0"}.`
+      : `Evolucao acumulada por categoria ${dailyData.interval === "monthly" ? "por mes" : "a partir do Dia 0 da fatura selecionada"}.`;
+    renderLineChart(series, dailyData.labels, dailyData.interval === "monthly" ? monthLabel : (label) => `Dia ${label}`);
     return;
   }
 
-  chartHint.textContent = "Grafico gerado a partir dos gastos preenchidos no formulario.";
-  renderBarChart(financialData.expenses);
+  chartHint.textContent = selectedImportIds().length
+    ? "As faturas selecionadas nao possuem saidas para desenhar; exibindo linha com os gastos preenchidos."
+    : "Grafico de linha gerado a partir dos gastos preenchidos no formulario.";
+  renderExpenseLineChart(financialData.expenses);
 }
 
 function appendInlineText(parent, text) {
@@ -587,6 +746,80 @@ function isActionSection(section) {
   return title.includes("plano") || title.includes("proximos");
 }
 
+function isInvestmentSection(section) {
+  return (section?.dataset.title || "").includes("caminhos de investimento");
+}
+
+function answerToneMeta(level) {
+  const levels = {
+    positive: { label: "Ponto positivo", summary: "positivos", rank: 0 },
+    neutral: { label: "Atencao", summary: "de atencao", rank: 1 },
+    negative: { label: "Ponto negativo", summary: "negativos", rank: 2 },
+  };
+  return levels[level] || levels.neutral;
+}
+
+function answerToneFromText(text, section) {
+  const value = normalizeColumnKey(text);
+  const title = section?.dataset.title || "";
+  const positiveTokens = [
+    "positivo", "bom", "boa", "otimo", "saudavel", "organizado", "equilibrado", "sobra",
+    "saldo positivo", "reserva cobre", "baixo endividamento", "dentro do esperado", "favoravel",
+  ];
+  const negativeTokens = [
+    "negativo", "divida", "dividas", "risco", "alto comprometimento", "gastos altos", "saldo negativo",
+    "reserva baixa", "insuficiente", "atraso", "urgente", "prejudica", "compromete", "evite",
+    "nao recomendado", "precisa reduzir", "problema",
+  ];
+  const neutralTokens = [
+    "atencao", "moderado", "media", "medio", "revisar", "acompanhar", "avaliar", "ajustar",
+    "melhorar", "planejar", "cautela", "pode", "paralelo",
+  ];
+
+  if (positiveTokens.some((token) => value.includes(token))) return "positive";
+  if (negativeTokens.some((token) => value.includes(token))) return "negative";
+  if (neutralTokens.some((token) => value.includes(token))) return "neutral";
+  if (title.includes("pontos de atencao")) return "neutral";
+  if (title.includes("proximos") || title.includes("plano")) return "positive";
+  return "neutral";
+}
+
+function cardTitleFromText(text, fallback) {
+  const cleanText = cleanAnswerLine(text).replace(/^[-*\s]+/, "").replace(/^\d+[.)]\s*/, "").trim();
+  const [firstPart] = cleanText.split(/\s+-\s+|:\s+/);
+  const title = firstPart.length > 8 && firstPart.length <= 70 ? firstPart : fallback;
+  return title.replace(/^\*\*|\*\*$/g, "").trim();
+}
+
+function appendInsightCard(section, text, fallbackTitle = "Resumo") {
+  let list = section.lastElementChild;
+  if (!list || !list.classList.contains("answer-card-list")) {
+    list = document.createElement("div");
+    list.className = "answer-card-list";
+    section.appendChild(list);
+  }
+
+  const cleanText = cleanAnswerLine(text).replace(/^[-*\s]+/, "").replace(/^\d+[.)]\s*/, "");
+  const level = answerToneFromText(cleanText, section);
+  const meta = answerToneMeta(level);
+  const card = document.createElement("article");
+  card.className = `answer-visual-card answer-visual-card-${level}`;
+  card.dataset.level = level;
+
+  const badge = document.createElement("span");
+  badge.className = "answer-visual-badge";
+  badge.textContent = meta.label;
+
+  const title = document.createElement("h4");
+  title.textContent = cardTitleFromText(cleanText, fallbackTitle);
+
+  const paragraph = document.createElement("p");
+  appendInlineText(paragraph, cleanText);
+
+  card.append(badge, title, paragraph);
+  list.appendChild(card);
+}
+
 function parsePipedActionLine(line) {
   const cells = line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim()).filter(Boolean);
   if (!/^\d+[.)]?$/.test(cells[0] || "") || cells.length < 2) return null;
@@ -639,7 +872,8 @@ function appendActionCard(section, action) {
   }
 
   const card = document.createElement("article");
-  card.className = "answer-action-card";
+  card.className = "answer-action-card answer-action-card-action";
+  card.dataset.level = "action";
   const header = document.createElement("div");
   header.className = "answer-action-head";
   const number = document.createElement("span");
@@ -648,7 +882,11 @@ function appendActionCard(section, action) {
   const title = document.createElement("h4");
   appendInlineText(title, action.title);
   header.append(number, title);
+  const badge = document.createElement("span");
+  badge.className = "answer-action-tone";
+  badge.textContent = "Etapa do plano";
   card.appendChild(header);
+  card.appendChild(badge);
   list.appendChild(card);
   if (action.details) appendActionDetail(section, action.details);
 }
@@ -661,18 +899,7 @@ function appendListItem(section, text) {
     return;
   }
 
-  let list = section.lastElementChild;
-  if (!list || list.tagName !== "OL") {
-    list = document.createElement("ol");
-    list.className = "answer-list";
-    section.appendChild(list);
-  }
-  const item = document.createElement("li");
-  const content = document.createElement("span");
-  content.className = "answer-list-content";
-  appendInlineText(content, text.replace(/^[-*–—]\s+/, "").replace(/^\d+[.)]\s*/, ""));
-  item.appendChild(content);
-  list.appendChild(item);
+  appendInsightCard(section, text, "Ponto da analise");
 }
 
 function appendStepTableItem(section, step, text) {
@@ -701,6 +928,139 @@ function appendTableRow(table, cells, isHeader) {
   table.appendChild(tr);
 }
 
+function investmentLevelFromText(text, index) {
+  const value = normalizeColumnKey(text);
+  const lowTokens = ["baixa", "baixo", "menos", "evitar", "aguardar", "deve esperar", "nao combina", "nao recomendado", "risco alto"];
+  const mediumTokens = ["media", "medio", "moderada", "moderado", "paralelo", "com cautela", "avaliar", "pode fazer sentido"];
+  const highTokens = ["alta", "alto", "mais recomendado", "prioridade", "combina bem", "recomendado", "ideal", "primeiro"];
+
+  if (lowTokens.some((token) => value.includes(token))) return "low";
+  if (mediumTokens.some((token) => value.includes(token))) return "medium";
+  if (highTokens.some((token) => value.includes(token))) return "high";
+  return index === 0 ? "high" : index === 1 ? "medium" : "low";
+}
+
+function investmentLevelMeta(level) {
+  const levels = {
+    high: { label: "Mais recomendado", rank: 0 },
+    medium: { label: "Recomendacao media", rank: 1 },
+    low: { label: "Menos recomendado", rank: 2 },
+  };
+  return levels[level] || levels.low;
+}
+
+function closeInvestmentModal(modal) {
+  modal.classList.remove("open");
+  modal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+}
+
+function openInvestmentModal(item) {
+  let modal = document.querySelector("#investmentModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "investmentModal";
+    modal.className = "investment-modal";
+    modal.setAttribute("aria-hidden", "true");
+    modal.innerHTML = `
+      <div class="investment-modal-backdrop" data-close-investment-modal></div>
+      <section class="investment-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="investmentModalTitle">
+        <button class="investment-modal-close" type="button" aria-label="Fechar explicacao" data-close-investment-modal>x</button>
+        <span class="investment-modal-badge"></span>
+        <h3 id="investmentModalTitle"></h3>
+        <div class="investment-modal-content"></div>
+      </section>
+    `;
+    modal.addEventListener("click", (event) => {
+      if (event.target.closest("[data-close-investment-modal]")) closeInvestmentModal(modal);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && modal.classList.contains("open")) closeInvestmentModal(modal);
+    });
+    document.body.appendChild(modal);
+  }
+
+  const meta = investmentLevelMeta(item.level);
+  modal.querySelector(".investment-modal-dialog").dataset.level = item.level;
+  modal.querySelector(".investment-modal-badge").textContent = meta.label;
+  modal.querySelector("#investmentModalTitle").textContent = item.name;
+  const content = modal.querySelector(".investment-modal-content");
+  content.innerHTML = "";
+
+  [
+    ["Por que combina", item.reason],
+    ["Uso recomendado", item.recommendation],
+  ].forEach(([label, value]) => {
+    const block = document.createElement("article");
+    const heading = document.createElement("h4");
+    const paragraph = document.createElement("p");
+    heading.textContent = label;
+    appendInlineText(paragraph, value || "Sem detalhe informado pela IA.");
+    block.append(heading, paragraph);
+    content.appendChild(block);
+  });
+
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  modal.querySelector(".investment-modal-close").focus();
+}
+
+function appendInvestmentCards(section, rows) {
+  const normalizedRows = normalizeTableRows(rows);
+  if (normalizedRows.length < 2) return false;
+
+  const dataRows = normalizedRows.slice(1).filter((row) => row.some(Boolean));
+  if (!dataRows.length) return false;
+
+  const items = dataRows.map((row, index) => {
+    const recommendation = row[2] || row[row.length - 1] || "";
+    const level = investmentLevelFromText(`${recommendation} ${row.join(" ")}`, index);
+    return {
+      name: row[0] || `Caminho ${index + 1}`,
+      reason: row[1] || "",
+      recommendation,
+      level,
+      originalIndex: index,
+    };
+  }).sort((a, b) => {
+    const rankDiff = investmentLevelMeta(a.level).rank - investmentLevelMeta(b.level).rank;
+    return rankDiff || a.originalIndex - b.originalIndex;
+  });
+
+  const list = document.createElement("div");
+  list.className = "investment-path-list";
+  items.forEach((item) => {
+    const meta = investmentLevelMeta(item.level);
+    const button = document.createElement("button");
+    button.className = `investment-path-card investment-path-card-${item.level}`;
+    button.dataset.level = item.level === "high" ? "positive" : item.level === "medium" ? "neutral" : "negative";
+    button.type = "button";
+    button.addEventListener("click", () => openInvestmentModal(item));
+
+    const badge = document.createElement("span");
+    badge.className = "investment-path-badge";
+    badge.textContent = meta.label;
+
+    const title = document.createElement("strong");
+    appendInlineText(title, item.name);
+
+    const description = document.createElement("span");
+    description.className = "investment-path-summary";
+    appendInlineText(description, item.recommendation || item.reason || "Clique para ver a explicacao.");
+
+    const hint = document.createElement("span");
+    hint.className = "investment-path-hint";
+    hint.textContent = "Ver explicacao";
+
+    button.append(badge, title, description, hint);
+    list.appendChild(button);
+  });
+
+  section.appendChild(list);
+  return true;
+}
+
 function normalizeTableRows(rows) {
   const usefulRows = rows
     .map((row) => row.map((cell) => cell.trim()).filter(Boolean))
@@ -727,10 +1087,75 @@ function appendTable(section, rows) {
   const normalizedRows = normalizeTableRows(rows);
   if (!normalizedRows.length) return;
   if (isActionSection(section) && normalizedRows.length === 1 && normalizedRows[0][0]?.toLowerCase() === "etapa") return;
+  if (isInvestmentSection(section) && appendInvestmentCards(section, rows)) return;
   const table = document.createElement("table");
   table.className = "answer-table";
   normalizedRows.forEach((row, index) => appendTableRow(table, row, index === 0));
   section.appendChild(table);
+}
+
+function updateSectionSummaries() {
+  answer.querySelectorAll(".answer-section").forEach((section) => {
+    section.querySelector(".answer-section-summary")?.remove();
+    const cards = [...section.querySelectorAll(".answer-visual-card, .answer-action-card, .investment-path-card")];
+    if (!cards.length) return;
+
+    const counts = cards.reduce((totals, card) => {
+      const investmentLevel = card.classList.contains("investment-path-card-high")
+        ? "positive"
+        : card.classList.contains("investment-path-card-medium")
+          ? "neutral"
+          : card.classList.contains("investment-path-card-low")
+            ? "negative"
+            : null;
+      const level = card.dataset.level || investmentLevel || "neutral";
+      totals[level] = (totals[level] || 0) + 1;
+      return totals;
+    }, { positive: 0, neutral: 0, negative: 0 });
+
+    const summary = document.createElement("div");
+    summary.className = "answer-section-summary";
+    const intro = document.createElement("strong");
+    intro.textContent = "Resumo";
+    summary.appendChild(intro);
+
+    if (isActionSection(section)) {
+      const chip = document.createElement("span");
+      chip.className = "answer-summary-chip answer-summary-chip-action";
+      chip.textContent = `${cards.length} ${cards.length === 1 ? "acao" : "acoes"}`;
+      summary.appendChild(chip);
+      section.querySelector("h3")?.after(summary);
+      return;
+    }
+
+    [
+      ["positive", counts.positive],
+      ["neutral", counts.neutral],
+      ["negative", counts.negative],
+    ].filter(([, count]) => count > 0).forEach(([level, count]) => {
+      const chip = document.createElement("span");
+      chip.className = `answer-summary-chip answer-summary-chip-${level}`;
+      chip.textContent = `${count} ${answerToneMeta(level).summary}`;
+      summary.appendChild(chip);
+    });
+
+    section.querySelector("h3")?.after(summary);
+  });
+}
+
+function isTechnicalNextStep(line, section) {
+  const title = section?.dataset.title || "";
+  if (!title.includes("proximos passos")) return false;
+  const value = normalizeColumnKey(line);
+  return [
+    "openrouter",
+    "modelo gratuito",
+    "provedor",
+    "provider returned",
+    "fallback",
+    "relatorio local",
+    "tente novamente a analise com ia",
+  ].some((token) => value.includes(token));
 }
 
 function renderAiAnswer(text) {
@@ -763,6 +1188,7 @@ function renderAiAnswer(text) {
 
     currentSection = ensureAnswerSection(currentSection);
     const normalizedLine = cleanAnswerLine(cleanLine);
+    if (isTechnicalNextStep(normalizedLine, currentSection)) return;
     const action = isActionSection(currentSection) ? parsePipedActionLine(normalizedLine) : null;
     if (action) {
       flushTable();
@@ -784,10 +1210,94 @@ function renderAiAnswer(text) {
       return;
     }
     if (/^[-*–—]\s+/.test(cleanLine) || /^\d+[.)]\s+/.test(cleanLine)) appendListItem(currentSection, cleanLine);
-    else appendParagraph(currentSection, cleanLine);
+    else appendInsightCard(currentSection, cleanLine, "Resumo da secao");
   });
 
   flushTable();
+  updateSectionSummaries();
+  exportPdfButton.disabled = false;
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  })[character]);
+}
+
+function buildMetricItem(label, value) {
+  return `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`;
+}
+
+function exportAiReportToPdf() {
+  if (answer.hidden || !answer.innerHTML.trim()) return;
+
+  const reportWindow = window.open("", "_blank", "width=900,height=700");
+  if (!reportWindow) {
+    alert("Nao foi possivel abrir a janela de exportacao. Libere pop-ups para gerar o PDF.");
+    return;
+  }
+
+  const generatedAt = new Date().toLocaleString("pt-BR");
+  const metrics = [
+    ["Receita", dashboardIncome.textContent],
+    ["Total de gastos", dashboardExpenses.textContent],
+    ["Saldo mensal", dashboardBalance.textContent],
+    ["Taxa de gastos", dashboardRate.textContent],
+  ].map(([label, value]) => buildMetricItem(label, value || "-")).join("");
+
+  reportWindow.document.write(`<!doctype html>
+    <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <title>Relatorio financeiro IA - Finora</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { margin: 0; padding: 32px; background: #f4f1e9; color: #183c32; font-family: Arial, Helvetica, sans-serif; }
+          main { max-width: 920px; margin: 0 auto; padding: 34px; border: 1px solid #dedbd0; border-radius: 18px; background: #fffdf8; }
+          .brand { color: #b68432; font-size: 10px; font-weight: 900; letter-spacing: .18em; text-transform: uppercase; }
+          h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; font-weight: 400; }
+          h1 { margin: 8px 0 8px; font-size: 34px; }
+          .meta { margin: 0 0 22px; color: #718078; font-size: 11px; }
+          .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 24px; }
+          .metrics article { padding: 14px; border: 1px solid #dedbd0; border-radius: 12px; background: #f8f6ef; }
+          .metrics span { display: block; color: #718078; font-size: 9px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+          .metrics strong { display: block; margin-top: 8px; font-family: Georgia, "Times New Roman", serif; font-size: 18px; font-weight: 400; }
+          .answer-section { padding: 0; border: 0; background: transparent; page-break-inside: avoid; }
+          .answer-section + .answer-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid #dedbd0; }
+          .answer-section h3 { margin: 0 0 10px; color: #164c3d; font-size: 24px; }
+          p, li { color: #31483f; font-size: 13px; line-height: 1.75; }
+          ol { padding-left: 22px; }
+          table { width: 100%; margin: 12px 0; border-collapse: collapse; font-size: 11px; }
+          th, td { padding: 10px; border: 1px solid #dedbd0; text-align: left; vertical-align: top; }
+          th { background: #e7f0eb; color: #164c3d; font-size: 9px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+          .disclaimer { margin-top: 24px; color: #718078; font-size: 10px; text-align: center; }
+          @media print {
+            body { padding: 0; background: white; }
+            main { border: 0; border-radius: 0; }
+          }
+        </style>
+      </head>
+      <body>
+        <main>
+          <p class="brand">Finora</p>
+          <h1>Relatorio financeiro da IA</h1>
+          <p class="meta">Gerado em ${escapeHtml(generatedAt)}</p>
+          <section class="metrics">${metrics}</section>
+          <section>${answer.innerHTML}</section>
+          <p class="disclaimer">Conteudo educacional. Nao substitui aconselhamento financeiro profissional.</p>
+        </main>
+        <script>
+          addEventListener("load", () => {
+            print();
+          });
+        <\/script>
+      </body>
+    </html>`);
+  reportWindow.document.close();
 }
 
 function setLoading(loading) {
@@ -800,8 +1310,10 @@ function setLoading(loading) {
 
 async function submitAnalysis(event) {
   event.preventDefault();
+  if (analysisInFlight) return;
   formError.hidden = true;
   answer.hidden = true;
+  exportPdfButton.disabled = true;
 
   if (!form.reportValidity()) return;
 
@@ -814,12 +1326,13 @@ async function submitAnalysis(event) {
   }
   const prompt = buildPrompt(financialData);
 
-  if (prompt.length > 2000) {
+  if (prompt.length > MAX_LLM_PROMPT_CHARS) {
     formError.textContent = `O resumo gerado possui ${prompt.length} caracteres. Reduza o objetivo ou a quantidade de categorias.`;
     formError.hidden = false;
     return;
   }
 
+  analysisInFlight = true;
   renderMetrics(financialData);
   setActiveWorkspaceTab("dashboard");
   answerPlaceholder.hidden = true;
@@ -827,22 +1340,38 @@ async function submitAnalysis(event) {
   answer.textContent = "Consultando a IA...";
   setLoading(true);
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 95000);
+
   try {
     const response = await fetch("/api/llm", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
+      signal: controller.signal,
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.erro || "Erro desconhecido.");
+    const rawBody = await response.text();
+    let data = {};
+    try {
+      data = rawBody ? JSON.parse(rawBody) : {};
+    } catch {
+      data = {};
+    }
+    if (!response.ok) {
+      const message = [data.dica, data.detalhe || data.erro || rawBody].filter(Boolean).join(" ");
+      throw new Error(message || "Erro desconhecido.");
+    }
     renderAiAnswer(data.resposta);
-    resultStatus.textContent = "Analise concluida";
+    resultStatus.textContent = data.fallback ? "Analise local" : "Analise concluida";
     resultStatus.classList.add("success");
   } catch (error) {
-    answer.textContent = error.message || "Erro ao conectar com a API local.";
+    answer.textContent = error.name === "AbortError" ? "A consulta demorou demais para responder. Tente novamente ou altere o modelo do OpenRouter." : error.message || "Erro ao conectar com a API local.";
+    exportPdfButton.disabled = true;
     resultStatus.textContent = "Erro";
     resultStatus.classList.add("error");
   } finally {
+    analysisInFlight = false;
+    clearTimeout(timeout);
     submitButton.disabled = false;
     submitButton.textContent = "Analisar minhas financas ->";
     resultStatus.classList.remove("loading");
@@ -854,13 +1383,14 @@ goalDetailsInput.addEventListener("input", () => {
 });
 consultingTab.addEventListener("click", () => setActiveWorkspaceTab("consulting"));
 dashboardTab.addEventListener("click", () => setActiveWorkspaceTab("dashboard"));
+exportPdfButton.addEventListener("click", exportAiReportToPdf);
 addExpenseButton.addEventListener("click", () => {
   addExpenseRow("", 0, { focus: true });
   const financialData = collectFinancialData();
   renderDashboardMetrics(financialData);
   renderConsultingChart(financialData);
 });
-importSelect.addEventListener("change", () => applyImportedStatement(importSelect.value));
+importSelect.addEventListener("change", () => applyImportedStatement());
 form.addEventListener("input", () => {
   const financialData = collectFinancialData();
   renderDashboardMetrics(financialData);

@@ -48,11 +48,11 @@
 
           <div class="form-grid">
             <label class="import-select-field">
-              <span>Usar fatura importada</span>
-              <select id="importSelect" name="importSelect">
+              <span>Usar faturas importadas</span>
+              <select id="importSelect" name="importSelect" multiple size="4">
                 <option value="">Carregando importacoes...</option>
               </select>
-              <small id="importSummary">Selecione uma fatura para preencher os valores automaticamente.</small>
+              <small id="importSummary">Selecione uma ou mais faturas para preencher os valores automaticamente.</small>
             </label>
             <label>
               <span>Salario mensal</span>
@@ -173,7 +173,10 @@
                 <p class="section-kicker">Conclusao da IA</p>
                 <h2 id="resultTitle">Seu diagnostico financeiro</h2>
               </div>
-              <span class="result-status" id="resultStatus">Aguardando</span>
+              <div class="dashboard-answer-actions">
+                <span class="result-status" id="resultStatus">Aguardando</span>
+                <button class="export-pdf-button" id="exportPdfButton" type="button" disabled>Exportar PDF</button>
+              </div>
             </div>
             <div id="chartConclusion">
               <div class="answer-placeholder" id="answerPlaceholder">

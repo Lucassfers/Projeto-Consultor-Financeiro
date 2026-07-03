@@ -7,14 +7,33 @@ interface ImportPayload {
   transactions: Transaction[];
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...options?.headers },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.erro || "Nao foi possivel acessar o banco de dados.");
-  return body as T;
+async function request<T>(url: string, options?: RequestInit, timeoutMs = 60000): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: options?.signal || controller.signal,
+      headers: { "Content-Type": "application/json", ...options?.headers },
+    });
+    const rawBody = await response.text();
+    let body: Record<string, unknown> = {};
+    try {
+      body = rawBody ? JSON.parse(rawBody) : {};
+    } catch {
+      body = {};
+    }
+    if (!response.ok) throw new Error(String(body.erro || body.detalhe || rawBody || "Nao foi possivel acessar o banco de dados."));
+    return body as T;
+  } catch (cause) {
+    if (cause instanceof Error && cause.name === "AbortError") {
+      throw new Error("A consulta demorou demais para responder. Tente novamente ou altere o modelo do OpenRouter.");
+    }
+    throw cause;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export const api = {
